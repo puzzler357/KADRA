@@ -2,7 +2,8 @@
 
 Локальная HR-система: учёт сотрудников, оргструктура, табель, кадровые документы и отчётность.
 Работает в двух режимах — как настольное приложение (Tauri, Windows) и как веб-приложение с
-локальным Express-бэкендом. Данные всегда хранятся локально в SQLite, без внешних сервисов.
+локальным Express-бэкендом. Данные всегда хранятся локально в SQLite, без внешних сервисов;
+в сеть настольная сборка обращается только к серверу лицензий, и то необязательно.
 
 ## Стек
 
@@ -10,7 +11,7 @@
 |---|---|
 | Фронтенд | React 19, Vite 6, TypeScript, Tailwind CSS 4, React Router 7 |
 | Состояние и данные | Zustand-стор (`src/store`), TanStack Table, React Hook Form + Zod |
-| Настольное приложение | Tauri 2 (`@tauri-apps/plugin-sql` → SQLite) |
+| Настольное приложение | Tauri 2; база и лицензирование на Rust (`rusqlite`, `ed25519-dalek`, `reqwest`) |
 | Веб-режим | Express 4 + better-sqlite3, JWT, bcryptjs |
 | Документы | docxtemplater + PizZip (DOCX), ExcelJS (XLSX), html2pdf.js (PDF) |
 | Интерфейс | i18next: русский (по умолчанию), английский, туркменский |
@@ -21,12 +22,43 @@
 Единая точка входа — [src/data/index.ts](src/data/index.ts). Она определяет среду выполнения и
 выбирает бэкенд:
 
-- **В Tauri** (`__TAURI_INTERNALS__` в `window`) вызовы идут напрямую в локальную SQLite
-  через [src/data/tauriDb.ts](src/data/tauriDb.ts).
+- **В Tauri** (`__TAURI_INTERNALS__` в `window`) вызовы идут в локальную SQLite через
+  [src/data/tauriDb.ts](src/data/tauriDb.ts) и команды оболочки `db_*`
+  ([src/data/shellDb.ts](src/data/shellDb.ts)). Соединение держит Rust
+  ([src-tauri/src/db](src-tauri/src/db)): он применяет миграции и посев при открытии базы и
+  отклоняет запись, пока лицензия не действует.
 - **В браузере** те же вызовы уходят по HTTP на `/api/*` к Express-серверу [server.ts](server.ts),
   который работает с той же схемой через [src/db/sqlite.ts](src/db/sqlite.ts).
 
 Благодаря этому страницы не знают, в каком режиме они запущены, а бизнес-логика не дублируется.
+Схема описана один раз ([src/data/schema.ts](src/data/schema.ts),
+[src/data/entities.ts](src/data/entities.ts)); для оболочки она собирается в
+`src-tauri/schema.json` командой `npm run schema:export` — после любой правки схемы или посева.
+
+## Лицензирование
+
+Настольная сборка работает полностью только с действующей лицензией — модель перенесена из
+проекта GAS. Без лицензии приложение открывается в режиме «только чтение» (просмотр, отчёты,
+экспорт, резервная копия), а на пустой установке показывает экран активации. Активация —
+онлайн по ключу `HRD-XXXXX-XXXXX-XXXXX-XXXXX` или офлайн обменом файлами; состояние и действия —
+«Настройки → Лицензия». В веб-режиме лицензирование не действует.
+
+- Проверка — [src-tauri/src/license](src-tauri/src/license), правила и ТЗ — [LICENSING.md](LICENSING.md).
+- Сторона продавца — [license-server](license-server) (сервер и панель License Manager) и
+  `tools/hrd-license` (то же из консоли); руководство — [license-server/SellerManual.md](license-server/SellerManual.md).
+
+**Разработка.** `npm run tauri:dev` доверяет отладочному ключу и ходит к серверу лицензий на
+`http://127.0.0.1:8787/v1`. Поднять его: `cd license-server`, `npm install`,
+`npm run admin:dev -- add owner` (один раз), `npm run dev`. Выпустить отладочную лицензию без
+сервера: `node tools/hrd-license <команда> --dev`.
+
+**Релиз.** `npm run tauri:build` требует две вещи, иначе сборка остановится:
+
+1. релизный ключ подписи — `node tools/hrd-license keygen --kid hrd-2026-1` (открытая половина
+   попадёт в `src-tauri/license-keys.json` — её коммитят; закрытая останется в
+   `~/.hrd-license/keys` — две резервные копии на разных носителях обязательны);
+2. адрес сервера — `LICENSE_SERVER_URL=https://license.<домен>/v1`
+   (PowerShell: `$env:LICENSE_SERVER_URL="https://license.<домен>/v1"`).
 
 ## Целевая среда
 
@@ -76,7 +108,7 @@ src/
   locales/       ru, en, tk
   store/         клиентское состояние
 server.ts        Express REST API для веб-режима
-src-tauri/       Rust-обвязка Tauri, конфиг и иконки (сборка: NSIS + MSI)
+src-tauri/       Rust: база и охрана записи (src/db), лицензирование (src/license), конфиг, иконки
 license-server/  сервер лицензий и панель License Manager — отдельный подпроект
 tools/           консольные утилиты (hrd-license: выпуск лицензий без сервера)
 tests/api/       Vitest: REST API
@@ -99,6 +131,7 @@ Prettier их не затрагивают. Подробности — в
 | `npm run tauri:dev` | Настольное приложение в режиме разработки |
 | `npm run tauri:build` | Сборка инсталлятора (NSIS, MSI) |
 | `npm run lint` | Проверка типов `tsc --noEmit`, включая тесты |
+| `npm run schema:export` | Пересобирает `src-tauri/schema.json` (миграции и посев для оболочки Tauri) из `src/data` |
 | `npm run make:docx` | Пересобирает бланк `public/templates/blank.docx` из разметки в `scripts/makeDocxTemplate.ts` |
 | `npm run seed:load` | Наполняет базу боевым объёмом (10 000 сотрудников и год табеля) для замеров производительности. Флаги: `--employees=N`, `--year=YYYY`, `--no-timesheets`, `--db=путь` |
 
@@ -125,6 +158,16 @@ npm run verify
 
 E2E поднимают отдельный сервер на изолированной базе, поэтому рабочие данные не затрагиваются.
 
+Сторона Rust (база, охрана записи, лицензирование) проверяется отдельно, своим тулчейном:
+
+```bash
+cd src-tauri
+cargo test --lib                    # 75 тестов: приёмочные проверки LICENSING.md с подменой времени и железа
+cargo test --lib -- --ignored e2e   # сквозные: против утилиты hrd-license и настоящего сервера (нужен Node 22.18+)
+```
+
+Сервер лицензий — `npm test` в `license-server` (55 тестов).
+
 ## Документация
 
 | Файл | Содержание |
@@ -134,5 +177,6 @@ E2E поднимают отдельный сервер на изолирован
 | [AUDIT_REPORT.md](AUDIT_REPORT.md) | Отчёт по аудиту кода |
 | [TEST_SCENARIO.md](TEST_SCENARIO.md) | Ручные тестовые сценарии |
 | [BUILD_PROMPT.md](BUILD_PROMPT.md), [BUILD_PROMPT.v2.md](BUILD_PROMPT.v2.md) | Постановка для генерации приложения |
+| [LICENSING.md](LICENSING.md) | ТЗ на лицензирование: тарифы, форматы, протокол, состояния, реализация, приёмочные тесты |
 | [license-server/README.md](license-server/README.md) | Сервер лицензий: установка, настройка, webhook оплаты |
-| [license-server/LICENSING.md](license-server/LICENSING.md) | Правила лицензирования: тарифы, форматы, переносы, отзыв |
+| [license-server/SellerManual.md](license-server/SellerManual.md) | Руководство продавца: продажа, активация, продление, переносы |
