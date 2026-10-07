@@ -5,3 +5,5 @@ src-tauri/gen
 public/templates
 package-lock.json
 tests/.tmp
+license-server
+tools/hrd-license

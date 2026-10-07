@@ -77,9 +77,16 @@ src/
   store/         клиентское состояние
 server.ts        Express REST API для веб-режима
 src-tauri/       Rust-обвязка Tauri, конфиг и иконки (сборка: NSIS + MSI)
+license-server/  сервер лицензий и панель License Manager — отдельный подпроект
+tools/           консольные утилиты (hrd-license: выпуск лицензий без сервера)
 tests/api/       Vitest: REST API
 tests/e2e/       Playwright: сценарии в браузере
 ```
+
+`license-server/` и `tools/` — самостоятельные подпроекты на Node со своими
+`package.json`, `tsconfig.json` и проверками; корневые `lint`, `lint:eslint` и
+Prettier их не затрагивают. Подробности — в
+[license-server/README.md](license-server/README.md).
 
 ## Скрипты
 
@@ -127,3 +134,5 @@ E2E поднимают отдельный сервер на изолирован
 | [AUDIT_REPORT.md](AUDIT_REPORT.md) | Отчёт по аудиту кода |
 | [TEST_SCENARIO.md](TEST_SCENARIO.md) | Ручные тестовые сценарии |
 | [BUILD_PROMPT.md](BUILD_PROMPT.md), [BUILD_PROMPT.v2.md](BUILD_PROMPT.v2.md) | Постановка для генерации приложения |
+| [license-server/README.md](license-server/README.md) | Сервер лицензий: установка, настройка, webhook оплаты |
+| [license-server/LICENSING.md](license-server/LICENSING.md) | Правила лицензирования: тарифы, форматы, переносы, отзыв |

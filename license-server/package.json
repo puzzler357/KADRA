@@ -1,0 +1,25 @@
+{
+  "name": "hrdesk-license-server",
+  "private": true,
+  "type": "module",
+  "description": "HRDesk licence server and License Manager (see README.md)",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node src/server.ts",
+    "dev": "node --env-file=.env.dev src/server.ts",
+    "admin": "node src/admin-cli.ts",
+    "admin:dev": "node --env-file=.env.dev src/admin-cli.ts",
+    "test": "node --test --test-reporter=spec \"test/*.test.ts\"",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.20.4",
+    "typescript": "5.8"
+  }
+}

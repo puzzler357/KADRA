@@ -14,7 +14,17 @@ import globals from 'globals';
  */
 export default tseslint.config(
   {
-    ignores: ['dist/**', 'node_modules/**', 'src-tauri/**', 'public/**', 'tests/.tmp/**'],
+    // license-server и tools — отдельные подпроекты на Node со своими
+    // tsconfig и проверками; корневой линтер их не касается.
+    ignores: [
+      'dist/**',
+      'node_modules/**',
+      'src-tauri/**',
+      'public/**',
+      'tests/.tmp/**',
+      'license-server/**',
+      'tools/**',
+    ],
   },
 
   js.configs.recommended,

@@ -1,0 +1,6 @@
+# Базы и выпущенные файлы при работе с dev-ключом
+dev/*.db*
+*.hrdreq
+*.hrdlic
+*.hrdclock
+*.hrddeact

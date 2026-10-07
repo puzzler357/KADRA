@@ -1,0 +1,7 @@
+{
+  "name": "hrd-license",
+  "private": true,
+  "type": "module",
+  "main": "cli.js",
+  "description": "The licence server's operations from the console (LICENSING.md 10.3); code lives in license-server/"
+}

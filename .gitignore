@@ -6,6 +6,8 @@ coverage/
 *.log
 .env*
 !.env.example
+# Настройки запуска сервера лицензий на своём компьютере: секретов в нём нет.
+!license-server/.env.dev
 
 # Артефакты тестов
 tests/.tmp/

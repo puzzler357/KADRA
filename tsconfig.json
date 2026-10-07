@@ -31,6 +31,8 @@
     "node_modules",
     "dist",
     "src-tauri",
-    "eslint.config.js"
+    "eslint.config.js",
+    "license-server",
+    "tools"
   ]
 }
