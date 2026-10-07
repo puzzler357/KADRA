@@ -11,13 +11,49 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+serde_json = "1"
 
 [dependencies]
 tauri = { version = "2", features = [] }
-tauri-plugin-sql = { version = "2", features = ["sqlite"] }
+# Open and save dialogs for the licence files, shown by the shell itself
+# (src/license/commands.rs); the window gets no dialog permission.
+tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The database is reached only through the shell's own db_* commands, so the
+# Rust side decides what may be written (src/db/guard.rs). "bundled"
+# compiles SQLite in, instead of depending on whatever the system provides.
+rusqlite = { version = "0.32", features = ["bundled"] }
+# Licence verification (src/license/). Ed25519 signatures over the payload
+# bytes, HMAC over the local state file, SHA-256 for fingerprint components.
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"
+sha2 = "0.10"
+hmac = "0.12"
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
+# The online exchange (src/license/client.rs). rustls with the ring provider
+# (builds with the C compiler SQLite already needs, unlike aws-lc), certificates
+# checked against the Windows store by the platform verifier, and the system
+# proxy honoured - offices often have one. No certificate pinning (5.2).
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls-no-provider", "system-proxy"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
+# The machine side of licensing: MachineGuid and the state copy in the
+# registry, SMBIOS UUID and disk serial through WMI, DPAPI for the device key.
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+wmi = "0.17"
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+# A release binary that is smaller and costlier to take apart (LICENSING.md
+# 9.3): strip drops the symbol names that would map the licence code at a
+# glance; lto and a single codegen unit inline across crates, blurring the
+# seams between the licence check and the rest; panic = "abort" leaves no
+# unwinding path to catch a failure in the middle of a check and carry on.
 [profile.release]
 panic = "abort"
 codegen-units = 1

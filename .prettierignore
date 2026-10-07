@@ -7,3 +7,5 @@ package-lock.json
 tests/.tmp
 license-server
 tools/hrd-license
+src-tauri/schema.json
+src-tauri/tests/fixtures

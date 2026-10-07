@@ -1,8 +1,9 @@
 // Реализация доступа к данным для нативного приложения (Tauri).
-// Работает напрямую с локальной SQLite через @tauri-apps/plugin-sql —
-// без сети, без сервера. Схема, миграции и первичные данные общие с
-// веб-режимом: src/data/schema.ts и src/data/seedData.ts.
-import Database from '@tauri-apps/plugin-sql';
+// Работает с локальной SQLite через команды оболочки (src/data/shellDb.ts):
+// соединение держит Rust и сверяет каждую запись с режимом лицензии. Схема,
+// миграции и первичный посев общие с веб-режимом (src/data/schema.ts,
+// seedData.ts), но в нативном приложении их применяет оболочка при открытии
+// базы — до того, как известен режим лицензии.
 import bcrypt from 'bcryptjs';
 import type {
   Employee, Department, Position, TimesheetRecord, ArchiveRecord, ArchiveFilters, Template, LoginResult,
@@ -10,107 +11,34 @@ import type {
 import {
   ENTITIES, ENTITY_BY_TABLE, AUDIT_TABLE, BACKUP_TABLES, insertSql, selectSql, updateSql, rowToObject, objectToValues,
 } from './entities';
-import { MIGRATIONS_TABLE_SQL, pendingMigrations } from './schema';
-import { CORE_SEED, seedValues } from './seedData';
 import { employeePatchFor, employeeUpdate } from './movements';
+import { shellDb, isReadOnlyError } from './shellDb';
+import type { ShellDb, SqlStatement } from './shellDb';
 
-const DB_URL = 'sqlite:local-hr-docs.db';
-
-let dbPromise: Promise<Database> | null = null;
-
-function getDb(): Promise<Database> {
-  if (!dbPromise) {
-    dbPromise = Database.load(DB_URL).then(async (db) => {
-      await migrate(db);
-      await seedIfEmpty(db);
-      return db;
-    });
-  }
-  return dbPromise;
-}
-
-// --- Миграции ---------------------------------------------------------------
-// Схема и список миграций общие с веб-режимом (src/data/schema.ts).
-// Здесь только исполнитель: он знает, как выполнить шаг через plugin-sql.
-
-async function appliedVersion(db: Database): Promise<number> {
-  const rows = await db.select<{ v: number | null }[]>('SELECT max(version) as v FROM _migrations');
-  return rows[0]?.v ?? 0;
-}
-
-async function hasColumn(db: Database, table: string, column: string): Promise<boolean> {
-  const columns = await db.select<{ name: string }[]>(`PRAGMA table_info(${table})`);
-  return columns.some((c) => c.name === column);
-}
-
-async function migrate(db: Database) {
-  await db.execute(MIGRATIONS_TABLE_SQL);
-
-  for (const migration of pendingMigrations(await appliedVersion(db))) {
-    for (const step of migration.steps) {
-      if (step.kind === 'sql') {
-        await db.execute(step.sql);
-        continue;
-      }
-      // Проверка вместо try/catch: колонка могла появиться в базе,
-      // созданной до того, как миграции завелись.
-      if (!(await hasColumn(db, step.table, step.column))) {
-        await db.execute(`ALTER TABLE ${step.table} ADD COLUMN ${step.column} ${step.definition}`);
-      }
-    }
-    await db.execute(
-      'INSERT INTO _migrations (version, name, applied_at) VALUES (?, ?, ?)',
-      [migration.version, migration.name, new Date().toISOString()],
-    );
-  }
-}
-
-// --- Первичный посев --------------------------------------------------------
-
-const SEED_FLAG = 'seeded';
-
-async function count(db: Database, table: string): Promise<number> {
-  const rows = await db.select<{ c: number }[]>(`SELECT count(*) as c FROM ${table}`);
-  return rows[0]?.c ?? 0;
-}
-
-// Посев выполняется ровно один раз за жизнь базы. Без отметки в meta сброс
-// системы был бы бессмысленным: демо-данные вернулись бы при следующем запуске.
-// Учётная запись владельца не сеется — пароль по умолчанию в поставке это
-// пароль, который знают все; владелец задаёт его при первом запуске.
-async function seedIfEmpty(db: Database) {
-  const flag = await db.select<{ value: string }[]>('SELECT value FROM meta WHERE key = ?', [SEED_FLAG]);
-  if (flag.length > 0) return;
-
-  // Непустая база (обновление со старой схемы) — только ставим отметку,
-  // чтобы не задваивать уже существующие записи.
-  if (await count(db, 'users') > 0 || await count(db, 'employees') > 0) {
-    await db.execute('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [SEED_FLAG, new Date().toISOString()]);
-    return;
-  }
-
-  for (const { sql, rows } of CORE_SEED) {
-    for (const row of rows) await db.execute(sql, row as unknown[]);
-  }
-
-  for (const entity of ENTITIES) {
-    const entitySeed = seedValues(entity.table);
-    if (!entitySeed) continue;
-    for (const row of entitySeed.rows) await db.execute(entitySeed.sql, row);
-  }
-
-  await db.execute('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [SEED_FLAG, new Date().toISOString()]);
+async function getDb(): Promise<ShellDb> {
+  return shellDb;
 }
 
 const rid = () => Math.random().toString(36).substring(7);
 
+const AUDIT_INSERT = 'INSERT INTO audit_log (id, ts, action, entity, entity_id, diff) VALUES (?, ?, ?, ?, ?, ?)';
+
+const auditStatement = (action: string, entity: string, entityId?: string | null, diff?: string | null): SqlStatement => ({
+  sql: AUDIT_INSERT,
+  params: [rid(), new Date().toISOString(), action, entity, entityId ?? null, diff ?? null],
+});
+
 // Журнал аудита пишется слоем данных, как и на сервере: событие должно
 // попадать в журнал вместе с самим изменением, а не когда экран вспомнит.
-async function audit(db: Database, action: string, entity: string, entityId?: string | null, diff?: string | null) {
-  await db.execute(
-    'INSERT INTO audit_log (id, ts, action, entity, entity_id, diff) VALUES (?, ?, ?, ?, ?, ?)',
-    [rid(), new Date().toISOString(), action, entity, entityId ?? null, diff ?? null],
-  );
+// В режиме «только чтение» журнал не пишется — и это не повод отказывать во
+// входе или просмотре: запись о входе не стоит того, чтобы запереть данные.
+async function audit(db: ShellDb, action: string, entity: string, entityId?: string | null, diff?: string | null) {
+  try {
+    const { sql, params } = auditStatement(action, entity, entityId, diff);
+    await db.execute(sql, params);
+  } catch (error) {
+    if (!isReadOnlyError(error)) throw error;
+  }
 }
 
 // ---- Employees ----
@@ -147,17 +75,10 @@ export async function createEmployee(emp: Omit<Employee, 'id'> & { id?: string }
 export async function createEmployeesBulk(rows: (Omit<Employee, 'id'> & { id?: string })[]): Promise<{ ids: string[] }> {
   const db = await getDb();
   const ids = rows.map((r) => r.id || rid());
-  await db.execute('BEGIN TRANSACTION');
-  try {
-    for (let i = 0; i < rows.length; i++) {
-      await db.execute(INSERT_EMPLOYEE, employeeValues(ids[i], rows[i]));
-    }
-    await db.execute('COMMIT');
-  } catch (e) {
-    await db.execute('ROLLBACK');
-    throw e;
-  }
-  await audit(db, 'import', 'employees', null, `${ids.length}`);
+  await db.transaction([
+    ...rows.map((row, i) => ({ sql: INSERT_EMPLOYEE, params: employeeValues(ids[i], row) })),
+    auditStatement('import', 'employees', null, `${ids.length}`),
+  ]);
   return { ids };
 }
 export async function updateEmployeeRow(id: string, e: Partial<Employee>): Promise<void> {
@@ -242,8 +163,8 @@ export async function listTimesheets(year?: number, month?: number): Promise<Tim
   const db = await getDb();
   const where: string[] = [];
   const params: any[] = [];
-  if (year !== undefined) { where.push(`year = $${params.push(year)}`); }
-  if (month !== undefined) { where.push(`month = $${params.push(month)}`); }
+  if (year !== undefined) { params.push(year); where.push('year = ?'); }
+  if (month !== undefined) { params.push(month); where.push('month = ?'); }
   const rows = await db.select<any[]>(
     `SELECT * FROM timesheets${where.length ? ` WHERE ${where.join(' AND ')}` : ''}`,
     params,
@@ -277,9 +198,9 @@ export async function listArchives(filters: ArchiveFilters = {}): Promise<Archiv
   const db = await getDb();
   const where: string[] = [];
   const params: any[] = [];
-  if (filters.year !== undefined) { where.push(`year = $${params.push(filters.year)}`); }
-  if (filters.department !== undefined) { where.push(`department = $${params.push(filters.department)}`); }
-  if (filters.employeeId !== undefined) { where.push(`employee_id = $${params.push(filters.employeeId)}`); }
+  if (filters.year !== undefined) { params.push(filters.year); where.push('year = ?'); }
+  if (filters.department !== undefined) { params.push(filters.department); where.push('department = ?'); }
+  if (filters.employeeId !== undefined) { params.push(filters.employeeId); where.push('employee_id = ?'); }
   const rows = await db.select<any[]>(
     `SELECT * FROM archives${where.length ? ` WHERE ${where.join(' AND ')}` : ''}`,
     params,
@@ -360,19 +281,13 @@ export async function applyMovement(movement: any): Promise<{ id: string; moveme
   const patch = employeePatchFor(record);
   const update = employeeUpdate(patch);
 
-  await db.execute('BEGIN TRANSACTION');
-  try {
-    await db.execute(insertSql(entity), [id, ...objectToValues(entity, record)]);
-    if (update) {
-      await db.execute(`UPDATE employees SET ${update.assignments} WHERE id = ?`, [...update.values, movement.employeeId]);
-    }
-    await db.execute('COMMIT');
-  } catch (e) {
-    await db.execute('ROLLBACK');
-    throw e;
-  }
-
-  await audit(db, 'movement', 'employees', movement.employeeId, `${movement.type} · ${movement.date}`);
+  await db.transaction([
+    { sql: insertSql(entity), params: [id, ...objectToValues(entity, record)] },
+    ...(update
+      ? [{ sql: `UPDATE employees SET ${update.assignments} WHERE id = ?`, params: [...update.values, movement.employeeId] }]
+      : []),
+    auditStatement('movement', 'employees', movement.employeeId, `${movement.type} · ${movement.date}`),
+  ]);
   return { id, movement: { ...record, id }, employeePatch: patch };
 }
 
@@ -388,16 +303,10 @@ export async function resetTables(adminPassword: string, tables: string[]): Prom
   const requested = tables.filter((t) => BACKUP_TABLES.includes(t));
   if (requested.length === 0) throw new Error('Не выбрано ни одной известной таблицы');
 
-  await db.execute('BEGIN TRANSACTION');
-  try {
-    for (const table of requested) await db.execute(`DELETE FROM ${table}`);
-    await db.execute('COMMIT');
-  } catch (e) {
-    await db.execute('ROLLBACK');
-    throw e;
-  }
-
-  await audit(db, 'reset_tables', 'system', null, requested.join(', '));
+  await db.transaction([
+    ...requested.map((table) => ({ sql: `DELETE FROM ${table}` })),
+    auditStatement('reset_tables', 'system', null, requested.join(', ')),
+  ]);
   return { cleared: requested };
 }
 
@@ -423,32 +332,29 @@ export async function restoreBackup(payload: any): Promise<{ restored: number; t
   const db = await getDb();
   let restored = 0;
 
-  await db.execute('BEGIN TRANSACTION');
-  try {
-    for (const table of tables) {
-      await db.execute(`DELETE FROM ${table}`);
+  // Сначала читаем, какие колонки есть в таблицах, потом пишем всё одной
+  // транзакцией: частично восстановленная копия хуже, чем никакая.
+  const statements: SqlStatement[] = [];
+  for (const table of tables) {
+    statements.push({ sql: `DELETE FROM ${table}` });
 
-      const rows = payload.data[table] as Record<string, unknown>[];
-      if (rows.length === 0) continue;
+    const rows = payload.data[table] as Record<string, unknown>[];
+    if (rows.length === 0) continue;
 
-      const info = await db.select<{ name: string }[]>(`PRAGMA table_info(${table})`);
-      const known = new Set(info.map((c) => c.name));
-      const columns = Object.keys(rows[0]).filter((c) => known.has(c));
-      if (columns.length === 0) continue;
+    const info = await db.select<{ name: string }[]>(`PRAGMA table_info(${table})`);
+    const known = new Set(info.map((c) => c.name));
+    const columns = Object.keys(rows[0]).filter((c) => known.has(c));
+    if (columns.length === 0) continue;
 
-      const sql = `INSERT OR REPLACE INTO ${table} (${columns.join(', ')}) VALUES (${columns.map((_, i) => `$${i + 1}`).join(', ')})`;
-      for (const row of rows) {
-        await db.execute(sql, columns.map((c) => row[c] ?? null));
-        restored += 1;
-      }
+    const sql = `INSERT OR REPLACE INTO ${table} (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`;
+    for (const row of rows) {
+      statements.push({ sql, params: columns.map((c) => row[c] ?? null) });
+      restored += 1;
     }
-    await db.execute('COMMIT');
-  } catch (e) {
-    await db.execute('ROLLBACK');
-    throw e;
   }
+  statements.push(auditStatement('restore', 'system', null, `${restored}`));
+  await db.transaction(statements);
 
-  await audit(db, 'restore', 'system', null, `${restored}`);
   return { restored, tables: tables.length };
 }
 
@@ -509,8 +415,8 @@ export async function resetSystem(adminPassword: string): Promise<void> {
   // сброс, иначе в приложение будет не войти. Список совпадает с серверным
   // RESETTABLE_TABLES в src/db/sqlite.ts.
   const tables = ['employees', 'departments', 'positions', 'templates', 'timesheets', 'archives', ...ENTITIES.map((e) => e.table)];
-  for (const table of tables) {
-    await db.execute(`DELETE FROM ${table}`);
-  }
-  await audit(db, 'reset', 'system', null, tables.join(', '));
+  await db.transaction([
+    ...tables.map((table) => ({ sql: `DELETE FROM ${table}` })),
+    auditStatement('reset', 'system', null, tables.join(', ')),
+  ]);
 }

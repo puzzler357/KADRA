@@ -7,7 +7,12 @@ const BASE_URL = `http://127.0.0.1:${PORT}`;
 
 // Каждый прогон стартует с чистой базы, засеянной значениями по умолчанию,
 // чтобы e2e никогда не трогали рабочую local-hr-docs.db.
-for (const suffix of ['', '-wal', '-shm']) {
+//
+// Только в главном процессе: конфиг заново читает и каждый воркер, уже после
+// старта сервера. На Windows занятый файл не удаляется, а на Linux удаление
+// проходит, и сервер остаётся с отвязанной базой («readonly database»).
+const isWorker = process.env.TEST_WORKER_INDEX !== undefined;
+for (const suffix of isWorker ? [] : ['', '-wal', '-shm']) {
   try {
     rmSync(e2eDbPath + suffix, { force: true });
   } catch {

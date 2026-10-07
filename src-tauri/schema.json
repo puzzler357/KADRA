@@ -1,0 +1,624 @@
+{
+  "latest": 5,
+  "migrationsTableSql": "\n  CREATE TABLE IF NOT EXISTS _migrations (\n    version INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    applied_at TEXT NOT NULL\n  );\n",
+  "migrations": [
+    {
+      "version": 1,
+      "name": "core-tables",
+      "steps": [
+        {
+          "kind": "sql",
+          "sql": "\n  CREATE TABLE IF NOT EXISTS users (\n    id TEXT PRIMARY KEY,\n    email TEXT UNIQUE NOT NULL,\n    password_hash TEXT NOT NULL,\n    role TEXT NOT NULL,\n    name TEXT NOT NULL\n  );\n\n  CREATE TABLE IF NOT EXISTS employees (\n    id TEXT PRIMARY KEY,\n    full_name TEXT NOT NULL,\n    position TEXT NOT NULL,\n    department TEXT NOT NULL,\n    status TEXT NOT NULL,\n    hire_date TEXT NOT NULL\n  );\n\n  CREATE TABLE IF NOT EXISTS departments (\n    id TEXT PRIMARY KEY,\n    name TEXT NOT NULL,\n    parent_id TEXT\n  );\n\n  CREATE TABLE IF NOT EXISTS positions (\n    id TEXT PRIMARY KEY,\n    department_id TEXT NOT NULL,\n    title TEXT NOT NULL,\n    max_count INTEGER NOT NULL,\n    salary REAL NOT NULL\n  );\n\n  CREATE TABLE IF NOT EXISTS templates (\n    id TEXT PRIMARY KEY,\n    name TEXT NOT NULL,\n    blocks TEXT NOT NULL\n  );\n\n  CREATE TABLE IF NOT EXISTS timesheets (\n    id TEXT PRIMARY KEY,\n    year INTEGER NOT NULL,\n    month INTEGER NOT NULL,\n    employee_id TEXT NOT NULL,\n    days TEXT NOT NULL\n  );\n\n  CREATE TABLE IF NOT EXISTS archives (\n    id TEXT PRIMARY KEY,\n    year INTEGER NOT NULL,\n    month INTEGER NOT NULL,\n    employee_id TEXT NOT NULL,\n    employee_name TEXT NOT NULL,\n    department TEXT NOT NULL,\n    position TEXT NOT NULL,\n    salary REAL NOT NULL,\n    hours_worked REAL NOT NULL\n  );\n\n  CREATE TABLE IF NOT EXISTS meta (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n  );\n"
+        }
+      ]
+    },
+    {
+      "version": 2,
+      "name": "employee-details",
+      "steps": [
+        {
+          "kind": "addColumn",
+          "table": "employees",
+          "column": "birth_date",
+          "definition": "TEXT"
+        },
+        {
+          "kind": "addColumn",
+          "table": "employees",
+          "column": "payment_type",
+          "definition": "TEXT DEFAULT 'salary'"
+        },
+        {
+          "kind": "addColumn",
+          "table": "employees",
+          "column": "salary",
+          "definition": "REAL DEFAULT 0"
+        },
+        {
+          "kind": "addColumn",
+          "table": "employees",
+          "column": "rate",
+          "definition": "REAL DEFAULT 1"
+        }
+      ]
+    },
+    {
+      "version": 3,
+      "name": "employee-tab-number",
+      "steps": [
+        {
+          "kind": "addColumn",
+          "table": "employees",
+          "column": "tab_number",
+          "definition": "TEXT"
+        }
+      ]
+    },
+    {
+      "version": 4,
+      "name": "core-indexes",
+      "steps": [
+        {
+          "kind": "sql",
+          "sql": "\n  CREATE INDEX IF NOT EXISTS idx_employees_department ON employees(department);\n  CREATE INDEX IF NOT EXISTS idx_employees_status ON employees(status);\n  CREATE INDEX IF NOT EXISTS idx_timesheets_period ON timesheets(year, month);\n  CREATE INDEX IF NOT EXISTS idx_timesheets_employee ON timesheets(employee_id);\n  CREATE INDEX IF NOT EXISTS idx_archives_year ON archives(year);\n  CREATE INDEX IF NOT EXISTS idx_archives_employee ON archives(employee_id);\n  CREATE INDEX IF NOT EXISTS idx_archives_department ON archives(department);\n  CREATE INDEX IF NOT EXISTS idx_positions_department ON positions(department_id);\n  CREATE INDEX IF NOT EXISTS idx_departments_parent ON departments(parent_id);\n"
+        }
+      ]
+    },
+    {
+      "version": 5,
+      "name": "screen-entities",
+      "steps": [
+        {
+          "kind": "sql",
+          "sql": "CREATE TABLE IF NOT EXISTS candidates (\n    id TEXT PRIMARY KEY,\n    full_name TEXT NOT NULL,\n    position TEXT NOT NULL,\n    experience TEXT,\n    status TEXT NOT NULL,\n    created_at TEXT NOT NULL,\n    note TEXT\n  );\n  CREATE INDEX IF NOT EXISTS idx_candidates_status ON candidates(status);\n  CREATE TABLE IF NOT EXISTS time_off_requests (\n    id TEXT PRIMARY KEY,\n    employee_id TEXT NOT NULL,\n    type TEXT NOT NULL,\n    date_from TEXT NOT NULL,\n    date_to TEXT NOT NULL,\n    days INTEGER NOT NULL DEFAULT 0,\n    status TEXT NOT NULL,\n    comment TEXT\n  );\n  CREATE INDEX IF NOT EXISTS idx_time_off_requests_employee_id ON time_off_requests(employee_id);\n  CREATE INDEX IF NOT EXISTS idx_time_off_requests_status ON time_off_requests(status);\n  CREATE TABLE IF NOT EXISTS checklist_tasks (\n    id TEXT PRIMARY KEY,\n    employee_id TEXT NOT NULL,\n    kind TEXT NOT NULL,\n    title TEXT NOT NULL,\n    assignee TEXT,\n    done INTEGER NOT NULL DEFAULT 0,\n    comment TEXT,\n    order_index INTEGER NOT NULL DEFAULT 0\n  );\n  CREATE INDEX IF NOT EXISTS idx_checklist_tasks_employee_id ON checklist_tasks(employee_id);\n  CREATE TABLE IF NOT EXISTS goals (\n    id TEXT PRIMARY KEY,\n    employee_id TEXT NOT NULL,\n    title TEXT NOT NULL,\n    progress INTEGER NOT NULL DEFAULT 0,\n    status TEXT NOT NULL,\n    period TEXT NOT NULL\n  );\n  CREATE INDEX IF NOT EXISTS idx_goals_employee_id ON goals(employee_id);\n  CREATE INDEX IF NOT EXISTS idx_goals_status ON goals(status);\n  CREATE TABLE IF NOT EXISTS reviews (\n    id TEXT PRIMARY KEY,\n    employee_id TEXT NOT NULL,\n    reviewer TEXT NOT NULL,\n    period TEXT NOT NULL,\n    score REAL NOT NULL DEFAULT 0,\n    comment TEXT\n  );\n  CREATE INDEX IF NOT EXISTS idx_reviews_employee_id ON reviews(employee_id);\n  CREATE TABLE IF NOT EXISTS movements (\n    id TEXT PRIMARY KEY,\n    employee_id TEXT NOT NULL,\n    type TEXT NOT NULL,\n    date TEXT NOT NULL,\n    from_position TEXT,\n    to_position TEXT,\n    from_department TEXT,\n    to_department TEXT,\n    from_salary REAL NOT NULL DEFAULT 0,\n    to_salary REAL NOT NULL DEFAULT 0,\n    order_no TEXT,\n    reason TEXT\n  );\n  CREATE INDEX IF NOT EXISTS idx_movements_employee_id ON movements(employee_id);\n  CREATE INDEX IF NOT EXISTS idx_movements_date ON movements(date);\n  CREATE TABLE IF NOT EXISTS audit_log (\n    id TEXT PRIMARY KEY,\n    ts TEXT NOT NULL,\n    action TEXT NOT NULL,\n    entity TEXT NOT NULL,\n    entity_id TEXT,\n    diff TEXT\n  );\n  CREATE TABLE IF NOT EXISTS report_presets (\n    id TEXT PRIMARY KEY,\n    name TEXT NOT NULL,\n    config TEXT NOT NULL\n  );\n  CREATE TABLE IF NOT EXISTS backups (\n    id TEXT PRIMARY KEY,\n    created_at TEXT NOT NULL,\n    file_name TEXT NOT NULL,\n    rows INTEGER NOT NULL DEFAULT 0,\n    note TEXT\n  );\n  CREATE TABLE IF NOT EXISTS kb_categories (\n    id TEXT PRIMARY KEY,\n    name TEXT NOT NULL,\n    order_index INTEGER NOT NULL DEFAULT 0\n  );\n  CREATE TABLE IF NOT EXISTS kb_articles (\n    id TEXT PRIMARY KEY,\n    category_id TEXT,\n    title TEXT NOT NULL,\n    content_html TEXT,\n    reads INTEGER NOT NULL DEFAULT 0,\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL\n  );\n  CREATE INDEX IF NOT EXISTS idx_kb_articles_category_id ON kb_articles(category_id);"
+        }
+      ]
+    }
+  ],
+  "seed": {
+    "flag": "seeded",
+    "batches": [
+      {
+        "sql": "INSERT INTO employees (id, full_name, position, department, status, hire_date, tab_number) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "rows": [
+          [
+            "1",
+            "Иванов Иван Иванович",
+            "Старший разработчик",
+            "IT",
+            "active",
+            "2021-03-15",
+            "0001"
+          ],
+          [
+            "2",
+            "Петров Петр Петрович",
+            "Менеджер по продажам",
+            "Продажи",
+            "active",
+            "2022-11-01",
+            "0002"
+          ],
+          [
+            "3",
+            "Смирнова Анна Игоревна",
+            "HR Специалист",
+            "HR",
+            "on_leave",
+            "2020-05-20",
+            "0003"
+          ],
+          [
+            "4",
+            "Аманмурадов Мердан",
+            "Аналитик данных",
+            "Аналитика",
+            "active",
+            "2023-01-10",
+            "0004"
+          ],
+          [
+            "5",
+            "Бердыева Айгуль",
+            "Junior Дизайнер",
+            "Дизайн",
+            "probation",
+            "2024-02-15",
+            "0005"
+          ]
+        ]
+      },
+      {
+        "sql": "INSERT INTO departments (id, name, parent_id) VALUES (?, ?, ?)",
+        "rows": [
+          [
+            "d1",
+            "ООО \"Глобал Тек\"",
+            null
+          ],
+          [
+            "d2",
+            "IT",
+            "d1"
+          ],
+          [
+            "d3",
+            "Продажи",
+            "d1"
+          ],
+          [
+            "d4",
+            "HR",
+            "d1"
+          ],
+          [
+            "d5",
+            "Аналитика",
+            "d1"
+          ],
+          [
+            "d6",
+            "Дизайн",
+            "d1"
+          ]
+        ]
+      },
+      {
+        "sql": "INSERT INTO positions (id, department_id, title, max_count, salary) VALUES (?, ?, ?, ?, ?)",
+        "rows": [
+          [
+            "p1",
+            "d1",
+            "Генеральный директор",
+            1,
+            250000
+          ],
+          [
+            "p2",
+            "d1",
+            "Финансовый директор",
+            1,
+            180000
+          ],
+          [
+            "p3",
+            "d1",
+            "Главный бухгалтер",
+            1,
+            150000
+          ],
+          [
+            "p4",
+            "d2",
+            "Старший разработчик",
+            3,
+            500000
+          ],
+          [
+            "p5",
+            "d2",
+            "Разработчик",
+            5,
+            300000
+          ],
+          [
+            "p6",
+            "d3",
+            "Менеджер по продажам",
+            10,
+            250000
+          ],
+          [
+            "p7",
+            "d4",
+            "HR Специалист",
+            2,
+            180000
+          ],
+          [
+            "p8",
+            "d5",
+            "Аналитик данных",
+            3,
+            250000
+          ],
+          [
+            "p9",
+            "d6",
+            "Junior Дизайнер",
+            2,
+            120000
+          ]
+        ]
+      },
+      {
+        "sql": "INSERT INTO templates (id, name, blocks) VALUES (?, ?, ?)",
+        "rows": [
+          [
+            "1",
+            "Справка с места работы",
+            "[{\"id\":\"1\",\"type\":\"text\",\"content\":\"Справка дана {{fullName}} в том, что он(а) действительно работает в {{orgName}} в должности {{position}}.\"}]"
+          ]
+        ]
+      },
+      {
+        "sql": "INSERT INTO archives (id, year, month, employee_id, employee_name, department, position, salary, hours_worked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "rows": [
+          [
+            "a1",
+            2023,
+            12,
+            "1",
+            "Иванов Иван Иванович",
+            "IT",
+            "Старший разработчик",
+            500000,
+            160
+          ],
+          [
+            "a2",
+            2023,
+            12,
+            "2",
+            "Петров Петр Петрович",
+            "Продажи",
+            "Менеджер по продажам",
+            300000,
+            150
+          ],
+          [
+            "a3",
+            2023,
+            11,
+            "1",
+            "Иванов Иван Иванович",
+            "IT",
+            "Старший разработчик",
+            500000,
+            168
+          ],
+          [
+            "a4",
+            2023,
+            11,
+            "2",
+            "Петров Петр Петрович",
+            "Продажи",
+            "Менеджер по продажам",
+            280000,
+            160
+          ],
+          [
+            "a5",
+            2022,
+            12,
+            "1",
+            "Иванов Иван Иванович",
+            "IT",
+            "Разработчик",
+            400000,
+            160
+          ]
+        ]
+      },
+      {
+        "sql": "INSERT INTO candidates (id, full_name, position, experience, status, created_at, note) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "rows": [
+          [
+            "c1",
+            "Алексей Смирнов",
+            "Фронтенд разработчик",
+            "3 года",
+            "new",
+            "2026-09-13",
+            null
+          ],
+          [
+            "c2",
+            "Елена Попова",
+            "UX/UI Дизайнер",
+            "5 лет",
+            "screening",
+            "2026-09-13",
+            null
+          ],
+          [
+            "c3",
+            "Дмитрий Волков",
+            "Бэкенд разработчик",
+            "4 года",
+            "interview",
+            "2026-09-13",
+            null
+          ],
+          [
+            "c4",
+            "Ольга Новикова",
+            "Менеджер проектов",
+            "6 лет",
+            "offer",
+            "2026-09-13",
+            null
+          ]
+        ]
+      },
+      {
+        "sql": "INSERT INTO time_off_requests (id, employee_id, type, date_from, date_to, days, status, comment) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "rows": [
+          [
+            "to1",
+            "1",
+            "vacation",
+            "2026-08-15",
+            "2026-08-28",
+            14,
+            "approved",
+            null
+          ],
+          [
+            "to2",
+            "2",
+            "sick",
+            "2026-07-01",
+            "2026-07-05",
+            5,
+            "pending",
+            null
+          ],
+          [
+            "to3",
+            "3",
+            "dayoff",
+            "2026-06-10",
+            "2026-06-10",
+            1,
+            "rejected",
+            null
+          ]
+        ]
+      },
+      {
+        "sql": "INSERT INTO checklist_tasks (id, employee_id, kind, title, assignee, done, comment, order_index) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "rows": [
+          [
+            "ck1",
+            "5",
+            "onboarding",
+            "Оформить трудовой договор",
+            "HR",
+            1,
+            null,
+            1
+          ],
+          [
+            "ck2",
+            "5",
+            "onboarding",
+            "Выдать оборудование",
+            "IT",
+            1,
+            null,
+            2
+          ],
+          [
+            "ck3",
+            "5",
+            "onboarding",
+            "Провести вводный инструктаж",
+            "Руководитель",
+            0,
+            null,
+            3
+          ],
+          [
+            "ck4",
+            "5",
+            "onboarding",
+            "Назначить наставника",
+            "Руководитель",
+            0,
+            null,
+            4
+          ],
+          [
+            "ck5",
+            "4",
+            "offboarding",
+            "Вернуть оборудование",
+            "IT",
+            0,
+            null,
+            1
+          ],
+          [
+            "ck6",
+            "4",
+            "offboarding",
+            "Закрыть доступы",
+            "IT",
+            0,
+            null,
+            2
+          ]
+        ]
+      },
+      {
+        "sql": "INSERT INTO goals (id, employee_id, title, progress, status, period) VALUES (?, ?, ?, ?, ?, ?)",
+        "rows": [
+          [
+            "g1",
+            "1",
+            "Перевести отчётность на новый конструктор",
+            60,
+            "on-track",
+            "2026-Q3"
+          ],
+          [
+            "g2",
+            "2",
+            "Выполнить план продаж на квартал",
+            100,
+            "completed",
+            "2026-Q2"
+          ],
+          [
+            "g3",
+            "4",
+            "Автоматизировать сбор кадровой аналитики",
+            25,
+            "on-track",
+            "2026-Q3"
+          ]
+        ]
+      },
+      {
+        "sql": "INSERT INTO reviews (id, employee_id, reviewer, period, score, comment) VALUES (?, ?, ?, ?, ?, ?)",
+        "rows": [
+          [
+            "r1",
+            "1",
+            "Иванов Иван",
+            "2026-Q2",
+            4.5,
+            "Стабильный результат, берёт на себя сложные задачи."
+          ],
+          [
+            "r2",
+            "2",
+            "Иванов Иван",
+            "2026-Q2",
+            4,
+            "План выполнен, есть куда расти в работе с возражениями."
+          ]
+        ]
+      },
+      {
+        "sql": "INSERT INTO movements (id, employee_id, type, date, from_position, to_position, from_department, to_department, from_salary, to_salary, order_no, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "rows": [
+          [
+            "m1",
+            "1",
+            "hire",
+            "2021-03-15",
+            null,
+            "Старший разработчик",
+            null,
+            "IT",
+            0,
+            0,
+            "П-1",
+            null
+          ],
+          [
+            "m2",
+            "2",
+            "hire",
+            "2022-11-01",
+            null,
+            "Менеджер по продажам",
+            null,
+            "Продажи",
+            0,
+            0,
+            "П-2",
+            null
+          ],
+          [
+            "m3",
+            "3",
+            "hire",
+            "2020-05-20",
+            null,
+            "HR Специалист",
+            null,
+            "HR",
+            0,
+            0,
+            "П-3",
+            null
+          ],
+          [
+            "m4",
+            "4",
+            "hire",
+            "2023-01-10",
+            null,
+            "Аналитик данных",
+            null,
+            "Аналитика",
+            0,
+            0,
+            "П-4",
+            null
+          ],
+          [
+            "m5",
+            "5",
+            "hire",
+            "2024-02-15",
+            null,
+            "Junior Дизайнер",
+            null,
+            "Дизайн",
+            0,
+            0,
+            "П-5",
+            null
+          ]
+        ]
+      },
+      {
+        "sql": "INSERT INTO kb_categories (id, name, order_index) VALUES (?, ?, ?)",
+        "rows": [
+          [
+            "kc1",
+            "Кадровые процедуры",
+            1
+          ],
+          [
+            "kc2",
+            "Документы и справки",
+            2
+          ],
+          [
+            "kc3",
+            "Onboarding",
+            3
+          ]
+        ]
+      },
+      {
+        "sql": "INSERT INTO kb_articles (id, category_id, title, content_html, reads, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "rows": [
+          [
+            "ka1",
+            "kc1",
+            "Как оформить отпуск",
+            "<p>Заявление подаётся не позднее чем за две недели до начала отпуска.</p>",
+            0,
+            "2026-09-13",
+            "2026-09-13"
+          ],
+          [
+            "ka2",
+            "kc2",
+            "Справка с места работы",
+            "<p>Справка готовится в разделе «Генерация документов» по шаблону.</p>",
+            0,
+            "2026-09-13",
+            "2026-09-13"
+          ],
+          [
+            "ka3",
+            "kc3",
+            "Первый день нового сотрудника",
+            "<p>Чек-лист адаптации заполняется в разделе «Онбординг».</p>",
+            0,
+            "2026-09-13",
+            "2026-09-13"
+          ]
+        ]
+      }
+    ]
+  }
+}
