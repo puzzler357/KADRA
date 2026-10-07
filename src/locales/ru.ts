@@ -146,7 +146,9 @@ export const ru = {
       import: "Импорт",
       back: "Назад",
       apply: "Применить",
-      reset: "Сбросить"
+      reset: "Сбросить",
+      showPassword: "Показать пароль",
+      hidePassword: "Скрыть пароль"
     },
     user: {
       owner: "Владелец"

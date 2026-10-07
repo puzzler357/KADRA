@@ -146,7 +146,9 @@ export const tk = {
       import: "Import",
       back: "Yza",
       apply: "Ulan",
-      reset: "Dikelt"
+      reset: "Dikelt",
+      showPassword: "Paroly görkez",
+      hidePassword: "Paroly gizle"
     },
     user: {
       owner: "Eýesi"

@@ -9,7 +9,8 @@ import LicenseSettings from '../components/LicenseSettings';
 import { useMoney } from '../lib/money';
 import type { CurrencyDecimals, CurrencyPosition, ThousandsSeparator } from '../lib/money';
 import * as api from '../data';
-import { Settings as SettingsIcon, ShieldCheck, Key, Shield, Database, Link, Palette, Eye, Download, RefreshCw, Check, Sun, Moon, Monitor } from 'lucide-react';
+import PasswordInput from '../components/PasswordInput';
+import { Settings as SettingsIcon, ShieldCheck, Key, Shield, Database, Link, Palette, Download, RefreshCw, Check, Sun, Moon, Monitor } from 'lucide-react';
 import { clickable } from '../lib/a11y';
 import { useNotify } from '../components/Toasts';
 
@@ -390,25 +391,15 @@ export default function Settings() {
                 <div className="space-y-4 max-w-xl">
                   <div>
                     <label className="block text-sm font-medium mb-2 text-secondary">{t('settings.password.current')}</label>
-                    <div className="relative">
-                      <input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} placeholder={t('settings.password.currentPlaceholder')} className="w-full bg-input border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500" />
-                      <button className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-secondary">
-                        <Eye className="w-4 h-4" />
-                      </button>
-                    </div>
+                    <PasswordInput value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} placeholder={t('settings.password.currentPlaceholder')} className="w-full bg-input border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-2 text-secondary">{t('settings.password.new')}</label>
-                    <div className="relative">
-                      <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder={t('settings.password.minChars')} className="w-full bg-input border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500" />
-                      <button className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-secondary">
-                        <Eye className="w-4 h-4" />
-                      </button>
-                    </div>
+                    <PasswordInput value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder={t('settings.password.minChars')} className="w-full bg-input border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-2 text-secondary">{t('settings.password.confirm')}</label>
-                    <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder={t('settings.password.confirmPlaceholder')} className="w-full bg-input border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500" />
+                    <PasswordInput value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder={t('settings.password.confirmPlaceholder')} className="w-full bg-input border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500" />
                   </div>
                   <button onClick={async () => {
                     if (newPassword !== confirmPassword) {
@@ -527,8 +518,7 @@ export default function Settings() {
 
                   <div>
                     <label className="block text-sm font-medium mb-2 text-rose-400/80">{t('settings.security.adminPassword')}</label>
-                    <input
-                      type="password"
+                    <PasswordInput
                       value={resetPassword}
                       onChange={(e) => setResetPassword(e.target.value)}
                       placeholder={t('settings.security.adminPasswordPlaceholder')}

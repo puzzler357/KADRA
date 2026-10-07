@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../store/useAppStore';
 import * as api from '../data';
+import PasswordInput from '../components/PasswordInput';
 import { Monitor, Moon, Sun, Lock, Mail, User } from 'lucide-react';
 
 const fieldClass = 'block w-full pl-10 pr-3 py-2 border border-[var(--border-color)] rounded-xl bg-[var(--background)] focus:outline-none focus:ring-2 focus:ring-accent-500 sm:text-sm';
@@ -167,10 +168,9 @@ export default function Login() {
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                     <Lock className="h-5 w-5 text-muted" />
                   </div>
-                  <input
+                  <PasswordInput
                     id="password"
                     name="password"
-                    type="password"
                     autoComplete={needsSetup ? 'new-password' : 'current-password'}
                     required
                     value={password}
@@ -189,9 +189,8 @@ export default function Login() {
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <Lock className="h-5 w-5 text-muted" />
                     </div>
-                    <input
+                    <PasswordInput
                       id="repeat"
-                      type="password"
                       autoComplete="new-password"
                       required
                       value={repeat}

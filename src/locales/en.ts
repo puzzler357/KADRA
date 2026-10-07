@@ -146,7 +146,9 @@ export const en = {
       import: "Import",
       back: "Back",
       apply: "Apply",
-      reset: "Reset"
+      reset: "Reset",
+      showPassword: "Show password",
+      hidePassword: "Hide password"
     },
     user: {
       owner: "Owner"

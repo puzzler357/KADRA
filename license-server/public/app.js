@@ -34,6 +34,55 @@ function h(tag, attrs = {}, ...children) {
 const shown = (...children) =>
   children.flat(Infinity).filter(child => child !== null && child !== undefined && child !== false);
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/** Иконка штрихами: тот же приём, что у Lucide, только без зависимости. */
+function icon(...paths) {
+  const el = document.createElementNS(SVG_NS, 'svg');
+  for (const [key, value] of Object.entries({
+    viewBox: '0 0 24 24', width: 18, height: 18, fill: 'none', stroke: 'currentColor',
+    'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true'
+  })) el.setAttribute(key, String(value));
+  for (const d of paths) {
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', d);
+    el.append(path);
+  }
+  return el;
+}
+
+const EYE = ['M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z', 'M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z'];
+
+/**
+ * Поле пароля с кнопкой «показать».
+ *
+ * Пароль админа длинный и набирается вслепую, а второй фактор не прощает
+ * опечатку: ошибся в пароле — потратил ещё и код, который к тому моменту уже
+ * сменился. Возвращает и обёртку (её кладут в форму), и сам input — значение
+ * читают с него.
+ */
+function passwordField(attrs = {}) {
+  const input = h('input', { type: 'password', ...attrs });
+  const button = h('button', {
+    type: 'button', class: 'reveal', 'aria-pressed': 'false',
+    onclick: () => {
+      const shownNow = input.type === 'text';
+      input.type = shownNow ? 'password' : 'text';
+      button.setAttribute('aria-pressed', String(!shownNow));
+      button.setAttribute('aria-label', shownNow ? 'Показать пароль' : 'Скрыть пароль');
+      button.title = button.getAttribute('aria-label');
+      button.replaceChildren(shownNow ? icon(...EYE) : icon(...EYE, 'm3 3 18 18'));
+      // Клик по кнопке уводит фокус из поля — возвращаем его вместе с кареткой
+      // в конец, чтобы набор продолжался с того же места.
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    }
+  }, icon(...EYE));
+  button.setAttribute('aria-label', 'Показать пароль');
+  button.title = 'Показать пароль';
+  return { field: h('div', { class: 'pw' }, input, button), input };
+}
+
 function toast(message, kind = 'ok') {
   const el = document.getElementById('toast');
   el.textContent = message;
@@ -149,7 +198,7 @@ function showKey(license, key) {
 
 function loginView() {
   const username = h('input', { autocomplete: 'username', required: true, placeholder: 'owner', spellcheck: 'false' });
-  const password = h('input', { type: 'password', autocomplete: 'current-password', required: true });
+  const password = passwordField({ autocomplete: 'current-password', required: true });
   // The field wants the six digits the authenticator shows, not the secret
   // that was put into it once - a distinction worth spelling out, because
   // the browser only says "use the required format".
@@ -162,7 +211,7 @@ function loginView() {
     onsubmit: async event => {
       event.preventDefault();
       const result = await act(() => api('POST', '/admin/api/login',
-        { username: username.value, password: password.value, code: code.value }));
+        { username: username.value, password: password.input.value, code: code.value }));
       if (result) {
         state.user = result.username;
         await start();
@@ -171,7 +220,7 @@ function loginView() {
   },
   h('h1', {}, 'HRDesk License Manager'),
   h('label', {}, 'Имя администратора', username),
-  h('label', {}, 'Пароль', password),
+  h('label', {}, 'Пароль', password.field),
   h('label', {}, 'Одноразовый код', code,
     h('span', { class: 'muted' }, 'Шесть цифр из приложения-аутентификатора; меняются каждые 30 секунд')),
   h('button', { class: 'primary' }, 'Войти'));

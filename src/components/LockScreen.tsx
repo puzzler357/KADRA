@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Lock } from 'lucide-react';
 import * as api from '../data';
+import PasswordInput from './PasswordInput';
 import { useAppStore } from '../store/useAppStore';
 
 /**
@@ -60,9 +61,8 @@ export default function LockScreen() {
             </div>
           )}
 
-          <input
+          <PasswordInput
             ref={inputRef}
-            type="password"
             autoComplete="current-password"
             required
             value={password}

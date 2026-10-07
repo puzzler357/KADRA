@@ -52,6 +52,20 @@ test.describe('экран входа, когда пароль включён', (
     await expect(page.getByText(/password123/i)).toHaveCount(0);
   });
 
+  test('кнопка-глаз показывает набранный пароль и прячет обратно', async ({ page }) => {
+    await page.goto('/');
+
+    const password = page.locator('#password');
+    await password.fill('не видно, что набрал');
+    await expect(password).toHaveAttribute('type', 'password');
+
+    await page.getByRole('button', { name: 'Показать пароль' }).click();
+    await expect(password).toHaveAttribute('type', 'text');
+
+    await page.getByRole('button', { name: 'Скрыть пароль' }).click();
+    await expect(password).toHaveAttribute('type', 'password');
+  });
+
   test('неверный пароль показывает ошибку и не пускает внутрь', async ({ page }) => {
     await page.goto('/');
 
