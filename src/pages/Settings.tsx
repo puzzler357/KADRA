@@ -26,6 +26,7 @@ export default function Settings() {
     docxTemplatePath, setDocxTemplatePath,
     orgName, orgInn, orgDirector, dateFormat, startScreen,
     setOrgName, setOrgInn, setOrgDirector, setDateFormat, setStartScreen,
+    requirePassword, setRequirePassword,
     lockTimeoutMinutes, setLockTimeoutMinutes, lock,
     resetAppearance, resetSettings,
   } = useAppStore();
@@ -438,23 +439,50 @@ export default function Settings() {
 
           {activeTab === 'security' && (
             <div className="space-y-8 max-w-5xl">
-              {/* На месте нерабочего тумблера «вход без пароля» — блокировка
-                  по бездействию: она хотя бы что-то делает и работает на
-                  безопасность, а не против неё. */}
+              {/* Пароль при входе — выбор владельца, а не навязанное поведение:
+                  приложение однопользовательское и стоит на его устройстве.
+                  Пока он выключен, блокировки по бездействию тоже нет —
+                  снимать её было бы нечем. */}
+              <div className="bg-surface-2 border border-line rounded-2xl p-6">
+                <div className="flex items-center gap-2 mb-2">
+                  <Key className="w-5 h-5 text-accent-500" />
+                  <h3 className="text-lg font-medium">{t('settings.security.askPassword')}</h3>
+                </div>
+                <p className="text-sm text-muted mb-6">{t('settings.security.askPasswordHint')}</p>
+
+                <label className="flex items-center gap-3 cursor-pointer w-fit">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={requirePassword}
+                    onClick={() => { setRequirePassword(!requirePassword); logSetting('requirePassword', String(!requirePassword)); }}
+                    className={`relative w-11 h-6 rounded-full transition-colors ${requirePassword ? 'bg-accent-600' : 'bg-surface-3 border border-line'}`}
+                  >
+                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-all ${requirePassword ? 'left-[22px]' : 'left-0.5'}`} />
+                  </button>
+                  <span className="text-sm text-secondary">
+                    {requirePassword ? t('settings.security.on') : t('settings.security.off')}
+                  </span>
+                </label>
+              </div>
+
               <div className="bg-surface-2 border border-line rounded-2xl p-6">
                 <div className="flex items-center gap-2 mb-2">
                   <ShieldCheck className="w-5 h-5 text-emerald-500" />
                   <h3 className="text-lg font-medium">{t('settings.security.lockTitle')}</h3>
                 </div>
-                <p className="text-sm text-muted mb-6">{t('settings.security.lockHint')}</p>
+                <p className="text-sm text-muted mb-6">
+                  {requirePassword ? t('settings.security.lockHint') : t('settings.security.lockNeedsPassword')}
+                </p>
 
                 <div className="flex flex-wrap items-end gap-4">
                   <div className="w-56">
                     <label className="block text-sm font-medium mb-2 text-secondary">{t('settings.security.lockTimeout')}</label>
                     <select
                       value={lockTimeoutMinutes}
+                      disabled={!requirePassword}
                       onChange={(e) => { setLockTimeoutMinutes(Number(e.target.value)); logSetting('lockTimeoutMinutes', e.target.value); }}
-                      className="w-full bg-surface border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
+                      className="w-full bg-surface border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 disabled:opacity-50"
                     >
                       <option value={0}>{t('settings.security.lockOff')}</option>
                       {[5, 10, 15, 30, 60].map(n => (
@@ -465,7 +493,8 @@ export default function Settings() {
 
                   <button
                     onClick={lock}
-                    className="bg-surface-3 hover:bg-surface-hover border border-line text-secondary px-4 py-2.5 rounded-xl text-sm font-medium transition-colors"
+                    disabled={!requirePassword}
+                    className="bg-surface-3 hover:bg-surface-hover border border-line text-secondary px-4 py-2.5 rounded-xl text-sm font-medium transition-colors disabled:opacity-50"
                   >
                     {t('settings.security.lockNow')}
                   </button>

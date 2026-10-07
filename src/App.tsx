@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
@@ -29,15 +29,35 @@ import Archive from './pages/Archive';
 
 import LockScreen from './components/LockScreen';
 import { ErrorState } from './components/States';
+import * as api from './data';
 import { useIdleLock } from './lib/useIdleLock';
 import { useAppStore } from './store/useAppStore';
 import { useDatabaseStore } from './store/useDatabaseStore';
 
 export default function App() {
-  const { user, startScreen, locked } = useAppStore();
+  const { user, startScreen, locked, requirePassword, login } = useAppStore();
   const { fetchAll, error } = useDatabaseStore();
 
+  // Вход без пароля не мгновенный — это запрос к базе.
+  const [ownerChecked, setOwnerChecked] = useState(false);
+
   useIdleLock();
+
+  // Пароль при входе выключен — подставляем владельца сами. Учётная запись
+  // в приложении одна, и запрашивать её пароль при каждом запуске незачем;
+  // кому нужен экран входа, включает его в «Настройки → Безопасность».
+  useEffect(() => {
+    if (user || requirePassword) return;
+
+    let cancelled = false;
+    api.currentOwner()
+      // Владельца ещё нет — Login покажет экран первичной настройки.
+      .then((owner) => { if (!cancelled && owner) login(owner.user, owner.token); })
+      .catch(() => undefined)
+      .finally(() => { if (!cancelled) setOwnerChecked(true); });
+
+    return () => { cancelled = true; };
+  }, [user, requirePassword, login]);
 
   useEffect(() => {
     if (user) {
@@ -46,12 +66,18 @@ export default function App() {
   }, [user, fetchAll]);
 
   if (!user) {
+    // Пока автоматический вход не отработал, форму показывать нельзя:
+    // она мигнёт и исчезнет.
+    if (!requirePassword && !ownerChecked) {
+      return <div className="min-h-screen bg-[var(--background)]" />;
+    }
     return <Login />;
   }
 
   // Блокировка закрывает приложение целиком: данные не должны оставаться
-  // на экране, пока владелец отошёл.
-  if (locked) {
+  // на экране, пока владелец отошёл. Без пароля при входе снимать её нечем,
+  // поэтому и ставить незачем.
+  if (locked && requirePassword) {
     return <LockScreen />;
   }
 

@@ -38,6 +38,15 @@ app.get('/api/auth/status', (_req, res) => {
   res.json({ needsSetup: c === 0 });
 });
 
+// Владелец без проверки пароля. Нужен для входа, когда пароль при входе
+// выключен: учётная запись всё равно одна и лежит на этом же устройстве.
+app.get('/api/auth/owner', (_req, res) => {
+  const user = db.prepare("SELECT id, email, name, role FROM users ORDER BY id LIMIT 1").get() as any;
+  if (!user) return res.json({ user: null });
+  const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+  res.json({ user, token });
+});
+
 app.post('/api/auth/setup', (req, res) => {
   const { name, email, password } = req.body ?? {};
 

@@ -367,6 +367,19 @@ export async function authStatus(): Promise<{ needsSetup: boolean }> {
   return { needsSetup: (rows[0]?.c ?? 0) === 0 };
 }
 
+/**
+ * Владелец без проверки пароля — для входа с выключенным паролем.
+ * База лежит на устройстве владельца, так что секрета здесь не раскрывается:
+ * пароль защищает не файл, а экран.
+ */
+export async function currentOwner(): Promise<LoginResult | null> {
+  const db = await getDb();
+  const rows = await db.select<any[]>('SELECT id, email, name, role FROM users ORDER BY id LIMIT 1');
+  const user = rows[0];
+  if (!user) return null;
+  return { user: { id: user.id, email: user.email, name: user.name, role: user.role }, token: 'local' };
+}
+
 export async function setupOwner(name: string, email: string, password: string): Promise<LoginResult> {
   const db = await getDb();
   const rows = await db.select<{ c: number }[]>('SELECT count(*) as c FROM users');

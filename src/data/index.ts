@@ -194,6 +194,11 @@ export const restoreBackup = (payload: unknown): Promise<{ restored: number; tab
 export const authStatus = (): Promise<{ needsSetup: boolean }> =>
   isTauri ? tauri.authStatus() : fetch('/api/auth/status').then(jsonOrThrow);
 
+/** Владелец без ввода пароля. null — владельца ещё нет. */
+export const currentOwner = (): Promise<LoginResult | null> =>
+  isTauri ? tauri.currentOwner()
+    : fetch('/api/auth/owner').then(jsonOrThrow).then((d) => (d.user ? d : null));
+
 export const setupOwner = (name: string, email: string, password: string): Promise<LoginResult> =>
   isTauri ? tauri.setupOwner(name, email, password)
     : fetch('/api/auth/setup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, password }) }).then(jsonOrThrow);

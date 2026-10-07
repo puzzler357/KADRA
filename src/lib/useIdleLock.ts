@@ -18,14 +18,16 @@ export function useIdleLock() {
   const lockTimeoutMinutes = useAppStore((s) => s.lockTimeoutMinutes);
   const locked = useAppStore((s) => s.locked);
   const user = useAppStore((s) => s.user);
+  const requirePassword = useAppStore((s) => s.requirePassword);
   const lock = useAppStore((s) => s.lock);
 
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     // Блокировать нечего, пока никто не вошёл; уже заблокированное приложение
-    // таймер не трогает.
-    if (!user || locked || lockTimeoutMinutes <= 0) return;
+    // таймер не трогает. С выключенным паролем блокировки нет вовсе: экран
+    // снимается только паролем владельца.
+    if (!user || locked || !requirePassword || lockTimeoutMinutes <= 0) return;
 
     const timeoutMs = lockTimeoutMinutes * 60_000;
 
@@ -53,5 +55,5 @@ export function useIdleLock() {
       }
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [user, locked, lockTimeoutMinutes, lock]);
+  }, [user, locked, requirePassword, lockTimeoutMinutes, lock]);
 }

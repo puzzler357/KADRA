@@ -1,11 +1,39 @@
 import { test, expect } from '@playwright/test';
 import { OWNER_EMAIL } from './owner';
 
-// Эти тесты идут без сохранённой сессии — приложение должно показать форму
-// входа. Владелец к этому моменту уже создан проектом setup.
+// Эти тесты идут без сохранённой сессии. Владелец к этому моменту уже создан
+// проектом setup.
 test.use({ storageState: { cookies: [], origins: [] } });
 
-test.describe('экран входа', () => {
+/**
+ * Включает запрос пароля при входе до загрузки приложения.
+ *
+ * Пароль выключен по умолчанию, поэтому без этой подготовки экрана входа не
+ * будет вовсе: приложение само подставит владельца. zustand persist кладёт
+ * настройки в localStorage и мержит их поверх значений по умолчанию, так что
+ * одного ключа достаточно.
+ */
+async function enablePasswordGate(page: import('@playwright/test').Page) {
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'hr-docs-app-storage',
+      JSON.stringify({ state: { requirePassword: true }, version: 0 }),
+    );
+  });
+}
+
+test.describe('вход без пароля (по умолчанию)', () => {
+  test('приложение открывается сразу, без формы входа', async ({ page }) => {
+    await page.goto('/dashboard');
+
+    await expect(page.locator('main')).toBeVisible();
+    await expect(page.locator('#password')).toHaveCount(0);
+  });
+});
+
+test.describe('экран входа, когда пароль включён', () => {
+  test.beforeEach(({ page }) => enablePasswordGate(page));
+
   test('без сессии показывается форма входа, а не приложение', async ({ page }) => {
     await page.goto('/dashboard');
 

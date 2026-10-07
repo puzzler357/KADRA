@@ -35,6 +35,17 @@ describe('POST /api/auth/login', () => {
   });
 });
 
+describe('GET /api/auth/owner', () => {
+  it('отдаёт владельца без пароля — для входа, когда пароль при входе выключен', async () => {
+    const { status, body } = await api('GET', '/api/auth/owner');
+
+    expect(status).toBe(200);
+    expect(body.user).toMatchObject({ email: EMAIL, role: 'ADMIN' });
+    expect(body.user.password_hash).toBeUndefined();
+    expect(typeof body.token).toBe('string');
+  });
+});
+
 describe('POST /api/auth/change-password', () => {
   it('меняет пароль и старый перестаёт работать', async () => {
     const temp = 'temp-password-999';

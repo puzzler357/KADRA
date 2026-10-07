@@ -55,7 +55,14 @@ interface AppState {
   setDateFormat: (value: DateFormat) => void;
   setStartScreen: (value: string) => void;
 
-  // Блокировка по бездействию. 0 — выключена.
+  // Пароль при входе. Выключен по умолчанию: приложение однопользовательское
+  // и лежит на устройстве владельца, поэтому гонять его через форму входа при
+  // каждом запуске незачем. Включается в «Настройки → Безопасность».
+  requirePassword: boolean;
+  setRequirePassword: (value: boolean) => void;
+
+  // Блокировка по бездействию. 0 — выключена. Работает только когда включён
+  // пароль при входе: снимать блокировку всё равно нечем.
   lockTimeoutMinutes: number;
   locked: boolean;
   setLockTimeoutMinutes: (minutes: number) => void;
@@ -101,6 +108,7 @@ const SETTINGS_DEFAULTS = {
   orgDirector: '',
   dateFormat: 'dd.MM.yyyy' as DateFormat,
   startScreen: '/dashboard',
+  requirePassword: false,
   lockTimeoutMinutes: 15,
 };
 
@@ -138,6 +146,12 @@ export const useAppStore = create<AppState>()(
       setOrgDirector: (orgDirector) => set({ orgDirector }),
       setDateFormat: (dateFormat) => set({ dateFormat }),
       setStartScreen: (startScreen) => set({ startScreen }),
+
+      requirePassword: false,
+      // Выключение пароля заодно снимает блокировку: иначе владелец остался бы
+      // заперт на экране, который больше нечем открыть.
+      setRequirePassword: (requirePassword) =>
+        set(requirePassword ? { requirePassword } : { requirePassword, locked: false }),
 
       lockTimeoutMinutes: 15,
       // Состояние блокировки персистится намеренно: перезагрузка страницы не
@@ -193,6 +207,9 @@ export const useAppStore = create<AppState>()(
       name: 'hr-docs-app-storage',
       onRehydrateStorage: () => (state) => {
         if (state) {
+          // Блокировка, сохранённая с прошлого запуска, не должна пережить
+          // выключение пароля: снимать её было бы нечем.
+          if (!state.requirePassword && state.locked) state.locked = false;
           applyTheme(state.theme);
           applyAccentColor(state.accentColor);
           applyDensity(state.density);
