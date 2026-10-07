@@ -1,6 +1,10 @@
 import { create } from 'zustand';
 import * as api from '../data';
-import { ENTITIES, ENTITY_BY_TABLE } from '../data/entities';
+import i18n from '../i18n';
+import { ReadOnlyError } from '../data/shellDb';
+import { notifyOutsideReact } from '../components/Toasts';
+import { useLicenseStore } from './useLicenseStore';
+import { ENTITIES, ENTITY_BY_TABLE, TABLES } from '../data/entities';
 import type {
   Employee, Department, Position, TimesheetRecord, ArchiveRecord, ArchiveFilters, Template,
   Candidate, TimeOffRequest, ChecklistTask, Goal, Review, KbCategory, KbArticle, Movement, AuditEntry, ReportPreset, BackupEntry,
@@ -22,6 +26,20 @@ if (typeof window !== 'undefined') {
   } catch {
     /* приватный режим или запрет на доступ к хранилищу — не критично */
   }
+}
+
+/**
+ * Режим «только чтение» по лицензии: правка не начинается вовсе.
+ *
+ * Это удобство, а не защита — запись отклонит оболочка Tauri
+ * (src-tauri/src/db/guard.rs), что бы ни решил интерфейс. Проверка здесь
+ * нужна, чтобы оптимистичные обновления стора не показывали правку, которая
+ * не сохранится, и чтобы пользователь сразу увидел понятную причину.
+ */
+function blockedByLicense(): boolean {
+  if (!useLicenseStore.getState().isReadOnly()) return false;
+  notifyOutsideReact.current?.error(i18n.t('license.readOnlyError'));
+  return true;
 }
 
 interface DatabaseState {
@@ -157,6 +175,11 @@ export const useDatabaseStore = create<DatabaseState & FetchActions & EntityActi
     createIn: async (table, data) => {
       const entity = ENTITY_BY_TABLE.get(table);
       if (!entity) throw new Error(`Неизвестная таблица: ${table}`);
+      // Журнал событий интерфейса (смена оформления и т.п.) в режиме
+      // «только чтение» просто не пишется: тема меняется, а запись о ней —
+      // не повод для сообщения об ошибке.
+      if (table === TABLES.auditLog && useLicenseStore.getState().isReadOnly()) return '';
+      if (blockedByLicense()) throw new ReadOnlyError();
       const { id } = await api.createEntity(table, data);
       set((state) => ({
         [entity.stateKey]: [...(state as any)[entity.stateKey], { ...data, id }],
@@ -165,6 +188,7 @@ export const useDatabaseStore = create<DatabaseState & FetchActions & EntityActi
     },
 
     updateIn: async (table, id, patch) => {
+      if (blockedByLicense()) return;
       const entity = ENTITY_BY_TABLE.get(table);
       if (!entity) throw new Error(`Неизвестная таблица: ${table}`);
       // Сначала стор, потом БД: перетаскивание карточки и галочки в чек-листе
@@ -176,6 +200,7 @@ export const useDatabaseStore = create<DatabaseState & FetchActions & EntityActi
     },
 
     removeFrom: async (table, id) => {
+      if (blockedByLicense()) return;
       const entity = ENTITY_BY_TABLE.get(table);
       if (!entity) throw new Error(`Неизвестная таблица: ${table}`);
       set((state) => ({
@@ -185,6 +210,7 @@ export const useDatabaseStore = create<DatabaseState & FetchActions & EntityActi
     },
 
     applyMovement: async (movement) => {
+      if (blockedByLicense()) throw new ReadOnlyError();
       const { movement: saved, employeePatch } = await api.applyMovement(movement);
       set((state) => ({
         movements: [saved, ...state.movements],
@@ -217,14 +243,17 @@ export const useDatabaseStore = create<DatabaseState & FetchActions & EntityActi
     },
 
     addEmployee: async (emp) => {
+      if (blockedByLicense()) return;
       const { id } = await api.createEmployee(emp);
       set((state) => ({ employees: [...state.employees, { id, ...emp }] }));
     },
     updateEmployee: async (id, updated) => {
+      if (blockedByLicense()) return;
       set((state) => ({ employees: state.employees.map((e) => (e.id === id ? { ...e, ...updated } : e)) }));
       await api.updateEmployee(id, updated);
     },
     deleteEmployee: async (id) => {
+      if (blockedByLicense()) return;
       set((state) => ({ employees: state.employees.filter((e) => e.id !== id) }));
       await api.deleteEmployee(id);
     },
@@ -232,6 +261,7 @@ export const useDatabaseStore = create<DatabaseState & FetchActions & EntityActi
       set({ employees: emps });
     },
     importEmployees: async (rows) => {
+      if (blockedByLicense()) throw new ReadOnlyError();
       if (rows.length === 0) return 0;
       // Сначала БД, потом стор: раньше импорт менял только стейт, и данные
       // исчезали при первом же fetchAll().
@@ -242,36 +272,42 @@ export const useDatabaseStore = create<DatabaseState & FetchActions & EntityActi
     },
 
     addDepartment: async (dep) => {
+      if (blockedByLicense()) return;
       try {
         const { id } = await api.createDepartment(dep);
         set((s) => ({ departments: [...s.departments, { ...dep, id }] }));
       } catch (e) { console.error(e); }
     },
     updateDepartment: async (id, data) => {
+      if (blockedByLicense()) return;
       try {
         await api.updateDepartment(id, data);
         set((s) => ({ departments: s.departments.map((d) => (d.id === id ? { ...d, ...data } : d)) }));
       } catch (e) { console.error(e); }
     },
     deleteDepartment: async (id) => {
+      if (blockedByLicense()) return;
       try {
         await api.deleteDepartment(id);
         set((s) => ({ departments: s.departments.filter((d) => d.id !== id) }));
       } catch (e) { console.error(e); }
     },
     addPosition: async (pos) => {
+      if (blockedByLicense()) return;
       try {
         const { id } = await api.createPosition(pos);
         set((s) => ({ positions: [...s.positions, { ...pos, id }] }));
       } catch (e) { console.error(e); }
     },
     updatePosition: async (id, data) => {
+      if (blockedByLicense()) return;
       try {
         await api.updatePosition(id, data);
         set((s) => ({ positions: s.positions.map((p) => (p.id === id ? { ...p, ...data } : p)) }));
       } catch (e) { console.error(e); }
     },
     deletePosition: async (id) => {
+      if (blockedByLicense()) return;
       try {
         await api.deletePosition(id);
         set((s) => ({ positions: s.positions.filter((p) => p.id !== id) }));
@@ -279,36 +315,44 @@ export const useDatabaseStore = create<DatabaseState & FetchActions & EntityActi
     },
 
     addTimesheet: async (record) => {
+      if (blockedByLicense()) return;
       const { id } = await api.createTimesheet(record);
       set((state) => ({ timesheets: [...state.timesheets, { id, ...record }] }));
     },
     updateTimesheet: async (id, updated) => {
+      if (blockedByLicense()) return;
       set((state) => ({ timesheets: state.timesheets.map((t) => (t.id === id ? { ...t, ...updated } : t)) }));
       await api.updateTimesheet(id, updated);
     },
     deleteTimesheet: async (id) => {
+      if (blockedByLicense()) return;
       set((state) => ({ timesheets: state.timesheets.filter((t) => t.id !== id) }));
       await api.deleteTimesheet(id);
     },
 
     addArchive: async (record) => {
+      if (blockedByLicense()) return;
       const { id } = await api.createArchive(record);
       set((state) => ({ archives: [...state.archives, { id, ...record }] }));
     },
     deleteArchive: async (id) => {
+      if (blockedByLicense()) return;
       set((state) => ({ archives: state.archives.filter((a) => a.id !== id) }));
       await api.deleteArchive(id);
     },
 
     addTemplate: async (template) => {
+      if (blockedByLicense()) return;
       const { id } = await api.createTemplate(template);
       set((state) => ({ templates: [...state.templates, { id, ...template }] }));
     },
     updateTemplate: async (id, updated) => {
+      if (blockedByLicense()) return;
       set((state) => ({ templates: state.templates.map((t) => (t.id === id ? { ...t, ...updated } : t)) }));
       await api.updateTemplate(id, updated);
     },
     deleteTemplate: async (id) => {
+      if (blockedByLicense()) return;
       set((state) => ({ templates: state.templates.filter((t) => t.id !== id) }));
       await api.deleteTemplate(id);
     },

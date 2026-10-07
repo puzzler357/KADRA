@@ -1,6 +1,99 @@
 export const en = {
   translation: {
     app_name: "HRDesk",
+    license: {
+      title: "License",
+      subtitle: "This computer's license state, exchange files with the seller, and deactivation.",
+      webOnly: "Licensing applies to the desktop version of HRDesk only. The browser development mode is not checked.",
+      loading: "Loading license information…",
+      never: "—",
+      perpetual: "perpetual",
+      anyVersion: "all versions",
+      device: "Computer",
+      readOnlyError: "Changes are not saved: the license is in read-only mode. See Settings → License.",
+      field: {
+        state: "State",
+        customer: "Licensee",
+        number: "License number",
+        plan: "Plan",
+        computer: "Computer",
+        paidUntil: "Paid until",
+        leaseUntil: "File valid until",
+        maxVersion: "HRDesk versions up to",
+        lastCheck: "Last check",
+        appVersion: "HRDesk version"
+      },
+      plan: {
+        PERPETUAL: "Perpetual",
+        ANNUAL: "Annual",
+        QUARTERLY: "Quarterly",
+        MONTHLY: "Monthly"
+      },
+      mode: {
+        ONLINE: "online",
+        OFFLINE: "offline"
+      },
+      state: {
+        ACTIVE: "The license is active.",
+        GRACE: "The subscription has ended; grace days are running.",
+        UNLICENSED: "HRDesk is not activated.",
+        INVALID: "The license file is damaged or signed with an unknown key.",
+        MACHINE_MISMATCH: "The license was issued for another computer.",
+        REBIND_REQUIRED: "The license must be bound to this computer again: create a request file and send it to the seller.",
+        STATE_MISSING: "The license state could not be read.",
+        VERSION_NOT_COVERED: "This version of HRDesk is not covered by the license.",
+        CLOCK_ROLLBACK: "The computer clock is behind the last known time. Correct the date and time.",
+        REVOKED: "The license has been revoked.",
+        EXPIRED: "The subscription has ended. Renew it to continue working.",
+        LEASE_EXPIRED: "The license file has expired. Import a new file or check the license online.",
+        WEB: "Browser mode: licensing does not apply."
+      },
+      banner: {
+        readOnly: "Viewing, reports and export are available; changes are not saved.",
+        grace: "The subscription ended {{past}} day(s) ago, {{left}} grace day(s) left.",
+        leaseSoon: "The license file stops working in {{days}} day(s).",
+        paidSoon: "The subscription ends in {{days}} day(s). Remember to renew."
+      },
+      action: {
+        check: "Check license",
+        import: "Import file",
+        createRequest: "Create request file",
+        activate: "Activate",
+        activateOnline: "Activate online",
+        deactivate: "Deactivate computer",
+        deactivateFile: "Create confirmation file",
+        deactivateOnline: "Deactivate online",
+        cancel: "Cancel",
+        close: "Close"
+      },
+      activate: {
+        title: "Activate HRDesk",
+        subtitle: "Enter the license key you received from the seller. Without internet you can activate by exchanging files.",
+        key: "License key",
+        offlineTitle: "Without internet — by file exchange",
+        step1: "1. Save a request file (the key is entered above).",
+        step2: "2. Send the request file to the seller and receive a license file.",
+        step3: "3. Import the license file you received (.hrdlic)."
+      },
+      deactivate: {
+        title: "Deactivate this computer?",
+        desc: "HRDesk will save a confirmation file (.hrddeact) and remove the license from this computer. Send the file to the seller to free the seat for another computer. Data stays available for viewing.",
+        descOnline: "The server will free this computer's seat and the license will be removed from it. Without internet you can create a confirmation file (.hrddeact) and send it to the seller. Data stays available for viewing."
+      },
+      dialog: {
+        saveRequest: "Save request file",
+        saveProof: "Save deactivation confirmation file",
+        openLicense: "Choose a license file (.hrdlic) or an unlock file (.hrdclock)"
+      },
+      msg: {
+        imported: "License file installed",
+        requestSaved: "Request file saved",
+        checked: "License checked",
+        activated: "HRDesk activated",
+        deactivated: "Computer deactivated, confirmation file saved",
+        deactivatedOnline: "Computer deactivated, seat freed"
+      }
+    },
     nav: {
       dashboard: "Dashboard",
       employees: "Employees",
@@ -551,9 +644,6 @@ export const en = {
         orgName: "Organization name",
         inn: "Tax ID",
         director: "Head of organization"
-      },
-      license: {
-        loading: "Loading license information..."
       },
       password: {
         title: "My password",

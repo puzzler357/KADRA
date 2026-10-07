@@ -1,6 +1,99 @@
 export const tk = {
   translation: {
     app_name: "HRDesk",
+    license: {
+      title: "Ygtyýarnama",
+      subtitle: "Bu kompýuteriň ygtyýarnama ýagdaýy, satyjy bilen alyş-çalyş faýllary we öçürmek.",
+      webOnly: "Ygtyýarnama diňe HRDesk-iň iş stoly wersiýasynda ulanylýar. Brauzerdäki işläp düzmek tertibinde barlag ýok.",
+      loading: "Ygtyýarnama maglumatlary ýüklenýär…",
+      never: "—",
+      perpetual: "möhletsiz",
+      anyVersion: "ähli wersiýalar",
+      device: "Kompýuter",
+      readOnlyError: "Üýtgeşmeler ýatda saklanmaýar: ygtyýarnama «diňe okamak» tertibinde. Jikme-jiklikler — «Sazlamalar → Ygtyýarnama».",
+      field: {
+        state: "Ýagdaýy",
+        customer: "Eýesi",
+        number: "Ygtyýarnama belgisi",
+        plan: "Tarif",
+        computer: "Kompýuter",
+        paidUntil: "Tölenen möhleti",
+        leaseUntil: "Faýl hereket edýär",
+        maxVersion: "HRDesk wersiýalary",
+        lastCheck: "Soňky barlag",
+        appVersion: "HRDesk wersiýasy"
+      },
+      plan: {
+        PERPETUAL: "Möhletsiz",
+        ANNUAL: "Ýyllyk",
+        QUARTERLY: "Çärýeklik",
+        MONTHLY: "Aýlyk"
+      },
+      mode: {
+        ONLINE: "onlaýn",
+        OFFLINE: "oflaýn"
+      },
+      state: {
+        ACTIVE: "Ygtyýarnama hereket edýär.",
+        GRACE: "Abuna möhleti gutardy, ýeňillik günleri dowam edýär.",
+        UNLICENSED: "HRDesk işjeňleşdirilmedik.",
+        INVALID: "Ygtyýarnama faýly zeperlenen ýa-da näbelli açar bilen gol çekilen.",
+        MACHINE_MISMATCH: "Ygtyýarnama başga kompýuter üçin berlen.",
+        REBIND_REQUIRED: "Bu kompýutere gaýtadan baglamak gerek: haýyş faýlyny dörediň we satyja iberiň.",
+        STATE_MISSING: "Ygtyýarnamanyň ýagdaýyny okap bolmady.",
+        VERSION_NOT_COVERED: "HRDesk-iň bu wersiýasy ygtyýarnama girmeýär.",
+        CLOCK_ROLLBACK: "Kompýuteriň sagady soňky belli wagtdan yzda. Senäni we wagty düzediň.",
+        REVOKED: "Ygtyýarnama ýatyryldy.",
+        EXPIRED: "Abuna möhleti gutardy. Işi dowam etmek üçin uzaltmak gerek.",
+        LEASE_EXPIRED: "Ygtyýarnama faýlynyň möhleti gutardy. Täze faýly import ediň ýa-da internet arkaly barlaň.",
+        WEB: "Brauzer tertibi: ygtyýarnama ulanylmaýar."
+      },
+      banner: {
+        readOnly: "Görmek, hasabatlar we eksport elýeterli; üýtgeşmeler ýatda saklanmaýar.",
+        grace: "Abuna {{past}} gün öň gutardy, {{left}} ýeňillik güni galdy.",
+        leaseSoon: "Ygtyýarnama faýly {{days}} günden hereketini bes eder.",
+        paidSoon: "Abuna {{days}} günden gutarýar. Uzaltmagy ýatdan çykarmaň."
+      },
+      action: {
+        check: "Ygtyýarnamany barla",
+        import: "Faýly import et",
+        createRequest: "Haýyş faýlyny döret",
+        activate: "Işjeňleşdir",
+        activateOnline: "Internet arkaly işjeňleşdir",
+        deactivate: "Kompýuteri öçür",
+        deactivateFile: "Tassyklama faýlyny döret",
+        deactivateOnline: "Internet arkaly öçür",
+        cancel: "Ýatyr",
+        close: "Ýap"
+      },
+      activate: {
+        title: "HRDesk-i işjeňleşdirmek",
+        subtitle: "Satyjydan alan ygtyýarnama açaryňyzy giriziň. Internetsiz faýl alyşmak arkaly işjeňleşdirip bolýar.",
+        key: "Ygtyýarnama açary",
+        offlineTitle: "Internetsiz — faýl alyşmak arkaly",
+        step1: "1. Haýyş faýlyny ýatda saklaň (açar ýokarda girizildi).",
+        step2: "2. Haýyş faýlyny satyja iberiň we ygtyýarnama faýlyny alyň.",
+        step3: "3. Alnan ygtyýarnama faýlyny (.hrdlic) import ediň."
+      },
+      deactivate: {
+        title: "Bu kompýuteri öçürmelimi?",
+        desc: "HRDesk tassyklama faýlyny (.hrddeact) ýatda saklar we ygtyýarnamany bu kompýuterden aýyrar. Başga kompýuter üçin orny boşatmak üçin faýly satyja iberiň. Maglumatlar görmek üçin elýeterli galar.",
+        descOnline: "Serwer bu kompýuteriň ornuny boşadar we ygtyýarnama ondan aýrylar. Internetsiz tassyklama faýlyny (.hrddeact) döredip satyja iberip bilersiňiz. Maglumatlar görmek üçin elýeterli galar."
+      },
+      dialog: {
+        saveRequest: "Haýyş faýlyny ýatda sakla",
+        saveProof: "Öçürmegiň tassyklama faýlyny ýatda sakla",
+        openLicense: "Ygtyýarnama (.hrdlic) ýa-da açmak (.hrdclock) faýlyny saýlaň"
+      },
+      msg: {
+        imported: "Ygtyýarnama faýly oturdyldy",
+        requestSaved: "Haýyş faýly ýatda saklandy",
+        checked: "Ygtyýarnama barlandy",
+        activated: "HRDesk işjeňleşdirildi",
+        deactivated: "Kompýuter öçürildi, tassyklama faýly ýatda saklandy",
+        deactivatedOnline: "Kompýuter öçürildi, orun boşadyldy"
+      }
+    },
     nav: {
       dashboard: "Baş sahypa",
       employees: "Işgärler",
@@ -551,9 +644,6 @@ export const tk = {
         orgName: "Guramanyň ady",
         inn: "Salgyt belgisi (INN)",
         director: "Ýolbaşçynyň F.A.A."
-      },
-      license: {
-        loading: "Ygtyýarnama maglumaty ýüklenýär..."
       },
       password: {
         title: "Meniň parolym",

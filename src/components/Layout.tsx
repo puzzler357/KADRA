@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { LicenseBanner } from './LicenseGate';
 import { useTranslation } from 'react-i18next';
 import {
   Users,
@@ -132,6 +133,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             </h1>
           </div>
         </header>
+
+        {/* Причина режима «только чтение» и предупреждения о сроках лицензии —
+            в потоке страницы, чтобы не закрывать ни заголовок, ни кнопки. */}
+        <LicenseBanner />
 
         {/* Page Content */}
         <main className="flex-1 overflow-y-auto px-8 pb-8">

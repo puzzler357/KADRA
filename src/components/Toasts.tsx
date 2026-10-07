@@ -36,6 +36,12 @@ interface NotifyApi {
 
 const NotifyContext = createContext<NotifyApi | null>(null);
 
+/**
+ * Тот же API для кода вне React — сторов. Нужен, например, чтобы сказать
+ * пользователю, почему правка не сохранилась в режиме «только чтение».
+ */
+export const notifyOutsideReact: { current: NotifyApi | null } = { current: null };
+
 const KIND_STYLE: Record<ToastKind, { icon: typeof Info; className: string }> = {
   success: { icon: CheckCircle2, className: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' },
   error: { icon: AlertTriangle, className: 'border-rose-500/30 bg-rose-500/10 text-rose-400' },
@@ -82,6 +88,13 @@ export function NotifyProvider({ children }: { children: ReactNode }) {
     request?.resolve(ok);
     setRequest(null);
   };
+
+  useEffect(() => {
+    notifyOutsideReact.current = api;
+    return () => {
+      if (notifyOutsideReact.current === api) notifyOutsideReact.current = null;
+    };
+  }, [api]);
 
   return (
     <NotifyContext.Provider value={api}>

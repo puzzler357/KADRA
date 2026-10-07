@@ -5,6 +5,7 @@ import { useDatabaseStore, TABLES } from '../store/useDatabaseStore';
 import type { AuditEntry, BackupEntry } from '../store/useDatabaseStore';
 import { exportToExcel } from '../lib/excel';
 import ImportWizard from '../components/ImportWizard';
+import LicenseSettings from '../components/LicenseSettings';
 import { useMoney } from '../lib/money';
 import type { CurrencyDecimals, CurrencyPosition, ThousandsSeparator } from '../lib/money';
 import * as api from '../data';
@@ -374,11 +375,7 @@ export default function Settings() {
             </div>
           )}
 
-          {activeTab === 'license' && (
-            <div className="text-muted text-sm">
-              {t('settings.license.loading')}
-            </div>
-          )}
+          {activeTab === 'license' && <LicenseSettings />}
 
           {activeTab === 'passwords' && (
             <div className="max-w-3xl space-y-8">
