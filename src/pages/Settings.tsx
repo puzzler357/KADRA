@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../store/useAppStore';
 import { useDatabaseStore, TABLES } from '../store/useDatabaseStore';
@@ -34,6 +34,14 @@ export default function Settings() {
   const money = useMoney();
   const notify = useNotify();
   const [activeTab, setActiveTab] = useState('general');
+
+  // Пароль владельца может быть не задан: тогда подтверждать сброс нечем,
+  // менять нечего, а тумблер запроса при входе недоступен — включить запрос
+  // несуществующего пароля значило бы запереть владельца на экране входа.
+  const [hasPassword, setHasPassword] = useState(false);
+  useEffect(() => {
+    api.authStatus().then(status => setHasPassword(status.hasPassword)).catch(() => undefined);
+  }, []);
 
   
   const { auditLog, backups, createIn, removeFrom, fetchAll } = useDatabaseStore();
@@ -386,13 +394,17 @@ export default function Settings() {
                   <Key className="w-5 h-5 text-accent-400" />
                   <h3 className="text-lg font-medium">{t('settings.password.title')}</h3>
                 </div>
-                <p className="text-sm text-muted mb-6">{t('settings.password.hint')}</p>
+                <p className="text-sm text-muted mb-6">
+                  {hasPassword ? t('settings.password.hint') : t('settings.password.hintNoPassword')}
+                </p>
 
                 <div className="space-y-4 max-w-xl">
-                  <div>
-                    <label className="block text-sm font-medium mb-2 text-secondary">{t('settings.password.current')}</label>
-                    <PasswordInput value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} placeholder={t('settings.password.currentPlaceholder')} className="w-full bg-input border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500" />
-                  </div>
+                  {hasPassword && (
+                    <div>
+                      <label className="block text-sm font-medium mb-2 text-secondary">{t('settings.password.current')}</label>
+                      <PasswordInput value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} placeholder={t('settings.password.currentPlaceholder')} className="w-full bg-input border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500" />
+                    </div>
+                  )}
                   <div>
                     <label className="block text-sm font-medium mb-2 text-secondary">{t('settings.password.new')}</label>
                     <PasswordInput value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder={t('settings.password.minChars')} className="w-full bg-input border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500" />
@@ -412,6 +424,7 @@ export default function Settings() {
                     }
                     try {
                       await api.changePassword(user?.email || '', currentPassword, newPassword);
+                      setHasPassword(true);
                       notify.success(t('settings.password.success'));
                       setCurrentPassword('');
                       setNewPassword('');
@@ -439,15 +452,18 @@ export default function Settings() {
                   <Key className="w-5 h-5 text-accent-500" />
                   <h3 className="text-lg font-medium">{t('settings.security.askPassword')}</h3>
                 </div>
-                <p className="text-sm text-muted mb-6">{t('settings.security.askPasswordHint')}</p>
+                <p className="text-sm text-muted mb-6">
+                  {hasPassword ? t('settings.security.askPasswordHint') : t('settings.security.askPasswordNeedsSet')}
+                </p>
 
                 <label className="flex items-center gap-3 cursor-pointer w-fit">
                   <button
                     type="button"
                     role="switch"
                     aria-checked={requirePassword}
+                    disabled={!hasPassword}
                     onClick={() => { setRequirePassword(!requirePassword); logSetting('requirePassword', String(!requirePassword)); }}
-                    className={`relative w-11 h-6 rounded-full transition-colors ${requirePassword ? 'bg-accent-600' : 'bg-surface-3 border border-line'}`}
+                    className={`relative w-11 h-6 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${requirePassword ? 'bg-accent-600' : 'bg-surface-3 border border-line'}`}
                   >
                     <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-all ${requirePassword ? 'left-[22px]' : 'left-0.5'}`} />
                   </button>
@@ -516,16 +532,18 @@ export default function Settings() {
                     </button>
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium mb-2 text-rose-400/80">{t('settings.security.adminPassword')}</label>
-                    <PasswordInput
-                      value={resetPassword}
-                      onChange={(e) => setResetPassword(e.target.value)}
-                      placeholder={t('settings.security.adminPasswordPlaceholder')}
-                      className="w-full bg-input border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-rose-500 text-primary"
-                    />
-                    <p className="text-xs text-muted mt-2">{t('settings.security.passwordNeeded')}</p>
-                  </div>
+                  {hasPassword && (
+                    <div>
+                      <label className="block text-sm font-medium mb-2 text-rose-400/80">{t('settings.security.adminPassword')}</label>
+                      <PasswordInput
+                        value={resetPassword}
+                        onChange={(e) => setResetPassword(e.target.value)}
+                        placeholder={t('settings.security.adminPasswordPlaceholder')}
+                        className="w-full bg-input border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-rose-500 text-primary"
+                      />
+                      <p className="text-xs text-muted mt-2">{t('settings.security.passwordNeeded')}</p>
+                    </div>
+                  )}
 
                   {/* Ступень 3: данные выбранных модулей. */}
                   <div className="border-t border-line pt-6">

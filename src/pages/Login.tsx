@@ -48,13 +48,18 @@ export default function Login() {
     e.preventDefault();
     setError('');
 
-    if (password.length < 8) {
-      setError(t('login.passwordShort'));
-      return;
-    }
-    if (password !== repeat) {
-      setError(t('login.passwordMismatch'));
-      return;
+    // Пароль необязателен: пустые поля создают владельца без пароля, задать
+    // его можно позже в «Настройки → Пароль». Проверяем только то,
+    // что действительно ввели.
+    if (password || repeat) {
+      if (password.length < 8) {
+        setError(t('login.passwordShort'));
+        return;
+      }
+      if (password !== repeat) {
+        setError(t('login.passwordMismatch'));
+        return;
+      }
     }
 
     setLoading(true);
@@ -163,7 +168,7 @@ export default function Login() {
 
               <div>
                 <label htmlFor="password" className="block text-sm font-medium text-secondary dark:text-slate-300">
-                  {needsSetup ? t('login.newPassword') : t('login.password')}
+                  {needsSetup ? t('login.newPasswordOptional') : t('login.password')}
                 </label>
                 <div className="mt-1 relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -173,12 +178,15 @@ export default function Login() {
                     id="password"
                     name="password"
                     autoComplete={needsSetup ? 'new-password' : 'current-password'}
-                    required
+                    required={!needsSetup}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className={fieldClass}
                   />
                 </div>
+                {needsSetup && (
+                  <p className="mt-2 text-xs text-muted">{t('login.passwordOptionalHint')}</p>
+                )}
               </div>
 
               {needsSetup && (
@@ -193,7 +201,6 @@ export default function Login() {
                     <PasswordInput
                       id="repeat"
                       autoComplete="new-password"
-                      required
                       value={repeat}
                       onChange={(e) => setRepeat(e.target.value)}
                       className={fieldClass}

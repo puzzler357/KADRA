@@ -6,13 +6,22 @@ import path from 'node:path';
 const testDbPaths = [
   path.join(__dirname, '..', '.tmp', 'api-test.db'),
   path.join(__dirname, '..', '.tmp', 'api-reset-test.db'),
+  path.join(__dirname, '..', '.tmp', 'api-nopassword-test.db'),
 ];
 
 // Каждый прогон стартует с чистой базы: sqlite.ts сам создаст таблицы и засеет данные.
-function wipe() {
+//
+// tolerant нужен только после прогона: на Windows файл БД держит ещё не
+// закрытое соединение, и удаление падает с EBUSY. Перед прогоном ошибку,
+// наоборот, глушить нельзя — уцелевшая база молча исказила бы тесты.
+function wipe(tolerant = false) {
   for (const dbPath of testDbPaths) {
     for (const suffix of ['', '-wal', '-shm']) {
-      rmSync(dbPath + suffix, { force: true });
+      try {
+        rmSync(dbPath + suffix, { force: true });
+      } catch (err) {
+        if (!tolerant) throw err;
+      }
     }
   }
 }
@@ -22,5 +31,5 @@ export function setup() {
 }
 
 export function teardown() {
-  wipe();
+  wipe(true);
 }

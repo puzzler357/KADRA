@@ -34,8 +34,11 @@ function audit(action: string, entity: string, entityId?: string | null, diff?: 
 // Есть ли владелец. Пока нет — приложение показывает экран первичной
 // настройки вместо входа: пароль по умолчанию в поставке не предусмотрен.
 app.get('/api/auth/status', (_req, res) => {
-  const { c } = db.prepare('SELECT count(*) as c FROM users').get() as { c: number };
-  res.json({ needsSetup: c === 0 });
+  const owner = db.prepare('SELECT password_hash FROM users ORDER BY id LIMIT 1').get() as
+    { password_hash: string } | undefined;
+  // hasPassword отделяет «пароль не задан» от «задан»: пустой password_hash
+  // означает первое, и тогда экраны не просят ни ввода, ни подтверждения.
+  res.json({ needsSetup: !owner, hasPassword: Boolean(owner?.password_hash) });
 });
 
 // Владелец без проверки пароля. Нужен для входа, когда пароль при входе
@@ -53,13 +56,17 @@ app.post('/api/auth/setup', (req, res) => {
   const { c } = db.prepare('SELECT count(*) as c FROM users').get() as { c: number };
   if (c > 0) return res.status(409).json({ error: 'Владелец уже назначен' });
 
-  if (!email || !password || String(password).length < 8) {
-    return res.status(400).json({ error: 'Нужны email и пароль не короче 8 символов' });
+  if (!email) return res.status(400).json({ error: 'Нужен email' });
+  if (password && String(password).length < 8) {
+    return res.status(400).json({ error: 'Пароль не короче 8 символов' });
   }
 
+  // Пароль необязателен, и пустой password_hash означает «не задан».
+  // Приложение однопользовательское и лежит на устройстве владельца, поэтому
+  // на первом запуске пароль навязывался зря; задать его можно в настройках.
   const id = '1';
   db.prepare('INSERT INTO users (id, email, password_hash, role, name) VALUES (?, ?, ?, ?, ?)')
-    .run(id, email, bcrypt.hashSync(password, 10), 'ADMIN', name || email);
+    .run(id, email, password ? bcrypt.hashSync(String(password), 10) : '', 'ADMIN', name || email);
 
   audit('setup', 'auth', id, email);
 
@@ -71,7 +78,9 @@ app.post('/api/auth/login', (req, res) => {
   const { email, password } = req.body;
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email) as any;
   
-  if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+  // Пустой хэш — пароль не задан: входить по паролю не через что, и ни одна
+  // строка к нему не подойдёт, bcrypt сравнивает с пустым хэшем как false.
+  if (!user || !user.password_hash || !bcrypt.compareSync(String(password ?? ''), user.password_hash)) {
     audit('login_failed', 'auth', null, String(email ?? ''));
     return res.status(401).json({ error: 'Неверный email или пароль' });
   }
@@ -85,7 +94,8 @@ app.post('/api/auth/change-password', (req, res) => {
   const { email, currentPassword, newPassword } = req.body;
   
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email) as any;
-  if (!user || !bcrypt.compareSync(currentPassword, user.password_hash)) {
+  // Пароля ещё нет — подтверждать нечем, форма задаёт первый.
+  if (!user || (user.password_hash && !bcrypt.compareSync(String(currentPassword ?? ''), user.password_hash))) {
     return res.status(401).json({ error: 'Неверный текущий пароль' });
   }
   
@@ -100,7 +110,9 @@ app.post('/api/auth/reset-system', (req, res) => {
   const { adminPassword } = req.body;
   
   const admin = db.prepare('SELECT * FROM users WHERE role = ?').get('ADMIN') as any;
-  if (!admin || !bcrypt.compareSync(adminPassword, admin.password_hash)) {
+  // Пароль владельца может быть не задан — тогда сверять нечего, и ступенью
+  // защиты остаётся подтверждение в интерфейсе.
+  if (!admin || (admin.password_hash && !bcrypt.compareSync(String(adminPassword ?? ''), admin.password_hash))) {
     return res.status(401).json({ error: 'Неверный пароль администратора' });
   }
   
@@ -194,7 +206,9 @@ app.post('/api/reset/tables', (req, res) => {
   const { adminPassword, tables } = req.body ?? {};
 
   const admin = db.prepare('SELECT * FROM users WHERE role = ?').get('ADMIN') as any;
-  if (!admin || !bcrypt.compareSync(adminPassword, admin.password_hash)) {
+  // Пароль владельца может быть не задан — тогда сверять нечего, и ступенью
+  // защиты остаётся подтверждение в интерфейсе.
+  if (!admin || (admin.password_hash && !bcrypt.compareSync(String(adminPassword ?? ''), admin.password_hash))) {
     return res.status(401).json({ error: 'Неверный пароль администратора' });
   }
 
