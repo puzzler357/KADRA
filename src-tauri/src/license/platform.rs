@@ -17,7 +17,7 @@ pub trait Platform: Send + Sync {
     fn protect(&self, data: &[u8]) -> Result<Vec<u8>, String>;
     fn unprotect(&self, data: &[u8]) -> Result<Vec<u8>, String>;
 
-    /// The protected vault in HKCU\Software\HRDesk\License.
+    /// The protected vault in HKCU\Software\KADRA\License.
     fn vault_read(&self) -> Option<Vec<u8>>;
     fn vault_write(&self, data: &[u8]) -> Result<(), String>;
 }
@@ -39,7 +39,7 @@ mod windows_platform {
     use winreg::enums::HKEY_CURRENT_USER;
     use winreg::{RegKey, RegValue};
 
-    const VAULT_KEY: &str = r"Software\HRDesk\License";
+    const VAULT_KEY: &str = r"Software\KADRA\License";
     const VAULT_VALUE: &str = "Vault";
 
     #[derive(Default)]

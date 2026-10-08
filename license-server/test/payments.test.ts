@@ -33,7 +33,7 @@ describe('payment webhooks', () => {
     const signature = signPayload(options.key ?? secret, raw, at);
     const res = await fetch(`${base}/v1/payments/${options.source ?? 'bank'}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'X-HRD-Signature': signature },
+      headers: { 'content-type': 'application/json', 'X-KDR-Signature': signature },
       body: options.tamper ? raw.replace('"periods":1', '"periods":9') : raw
     });
     return { status: res.status, body: await res.json() as any };
@@ -116,6 +116,6 @@ describe('payment webhooks', () => {
     assert.equal((await send({ license_id: license.id })).body.error, 'VALIDATION');
     assert.equal((await send({ payment_id: 'f', license_id: license.id, paid_at: '2099-01-01T00:00:00Z' })).body.error, 'VALIDATION');
     assert.equal((await send({ payment_id: 'g', license_id: license.id, periods: 0 })).body.error, 'VALIDATION');
-    assert.equal((await send({ payment_id: 'h', license_id: 'HRD-2026-999999' })).status, 404);
+    assert.equal((await send({ payment_id: 'h', license_id: 'KDR-2026-999999' })).status, 404);
   });
 });

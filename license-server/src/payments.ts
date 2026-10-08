@@ -8,11 +8,11 @@
  *
  *   POST /v1/payments/<source>
  *   Content-Type: application/json
- *   X-HRD-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(secret, "<t>.<raw body>")>
+ *   X-KDR-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(secret, "<t>.<raw body>")>
  *
  *   { "payment_id": "unique in the sender",           required
- *     "license_id": "HRD-2026-000001",                one of these two
- *     "license_key": "HRD-XXXXX-XXXXX-XXXXX-XXXXX",
+ *     "license_id": "KDR-2026-000001",                one of these two
+ *     "license_key": "KDR-XXXXX-XXXXX-XXXXX-XXXXX",
  *     "periods": 1,                                   terms paid for, default 1
  *     "amount": 1200, "currency": "TMT",              for the books, optional
  *     "paid_at": "2026-10-01T09:30:00Z" }             default: now

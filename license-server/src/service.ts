@@ -261,7 +261,7 @@ export class LicenseService {
     const paidUntil = plan.term_months === null ? null : iso(endOfDay(addMonths(start, plan.term_months)));
 
     return inTransaction(this.db, () => {
-      const id = `HRD-${now.getUTCFullYear()}-${String(nextValue(this.db, `license-${now.getUTCFullYear()}`)).padStart(6, '0')}`;
+      const id = `KDR-${now.getUTCFullYear()}-${String(nextValue(this.db, `license-${now.getUTCFullYear()}`)).padStart(6, '0')}`;
       const licenseKey = generateLicenseKey();
       this.db.prepare(`INSERT INTO licenses (id, key_hash, customer_id, plan, activation_mode, seats, edition,
         features, paid_until, grace_days, max_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -415,7 +415,7 @@ export class LicenseService {
       revision,
       customer_id: license.customer_id,
       customer_name: this.customer(license.customer_id).name,
-      product: 'HRDESK',
+      product: 'KADRA',
       edition: license.edition,
       features: JSON.parse(license.features) as string[],
       plan: license.plan,
@@ -438,7 +438,7 @@ export class LicenseService {
     assertLeaseInvariant(payload);
 
     const file: IssuedFile = {
-      filename: `${license.id}_${activation.id}_r${revision}.hrdlic`,
+      filename: `${license.id}_${activation.id}_r${revision}.kdrlic`,
       content: JSON.stringify(seal(signer, payload), null, 2) + '\n',
       kind,
       license_id: license.id,
@@ -474,7 +474,7 @@ export class LicenseService {
     };
     return inTransaction(this.db, () => {
       const file: IssuedFile = {
-        filename: `${activation.license_id}_${activation.id}_r${revision}.hrdclock`,
+        filename: `${activation.license_id}_${activation.id}_r${revision}.kdrclock`,
         content: JSON.stringify(seal(signer, status), null, 2) + '\n',
         kind: 'CLOCK_RESET',
         license_id: activation.license_id,

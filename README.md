@@ -1,4 +1,6 @@
-# HRDesk
+<p align="center"><img src="assets/brand/kadra-logo.png" alt="KADRA — учёт кадров" width="480"></p>
+
+# KADRA
 
 Локальная HR-система: учёт сотрудников, оргструктура, табель, кадровые документы и отчётность.
 Работает в двух режимах — как настольное приложение (Tauri, Windows) и как веб-приложение с
@@ -40,23 +42,23 @@
 Настольная сборка работает полностью только с действующей лицензией — модель перенесена из
 проекта GAS. Без лицензии приложение открывается в режиме «только чтение» (просмотр, отчёты,
 экспорт, резервная копия), а на пустой установке показывает экран активации. Активация —
-онлайн по ключу `HRD-XXXXX-XXXXX-XXXXX-XXXXX` или офлайн обменом файлами; состояние и действия —
+онлайн по ключу `KDR-XXXXX-XXXXX-XXXXX-XXXXX` или офлайн обменом файлами; состояние и действия —
 «Настройки → Лицензия». В веб-режиме лицензирование не действует.
 
 - Проверка — [src-tauri/src/license](src-tauri/src/license), правила и ТЗ — [LICENSING.md](LICENSING.md).
 - Сторона продавца — [license-server](license-server) (сервер и панель License Manager) и
-  `tools/hrd-license` (то же из консоли); руководство — [license-server/SellerManual.md](license-server/SellerManual.md).
+  `tools/kdr-license` (то же из консоли); руководство — [license-server/SellerManual.md](license-server/SellerManual.md).
 
 **Разработка.** `npm run tauri:dev` доверяет отладочному ключу и ходит к серверу лицензий на
 `http://127.0.0.1:8787/v1`. Поднять его: `cd license-server`, `npm install`,
 `npm run admin:dev -- add owner` (один раз), `npm run dev`. Выпустить отладочную лицензию без
-сервера: `node tools/hrd-license <команда> --dev`.
+сервера: `node tools/kdr-license <команда> --dev`.
 
 **Релиз.** `npm run tauri:build` требует две вещи, иначе сборка остановится:
 
-1. релизный ключ подписи — `node tools/hrd-license keygen --kid hrd-2026-1` (открытая половина
+1. релизный ключ подписи — `node tools/kdr-license keygen --kid kdr-2026-1` (открытая половина
    попадёт в `src-tauri/license-keys.json` — её коммитят; закрытая останется в
-   `~/.hrd-license/keys` — две резервные копии на разных носителях обязательны);
+   `~/.kdr-license/keys` — две резервные копии на разных носителях обязательны);
 2. адрес сервера — `LICENSE_SERVER_URL=https://license.<домен>/v1`
    (PowerShell: `$env:LICENSE_SERVER_URL="https://license.<домен>/v1"`).
 
@@ -117,7 +119,7 @@ src/
 server.ts        Express REST API для веб-режима
 src-tauri/       Rust: база и охрана записи (src/db), лицензирование (src/license), конфиг, иконки
 license-server/  сервер лицензий и панель License Manager — отдельный подпроект
-tools/           консольные утилиты (hrd-license: выпуск лицензий без сервера)
+tools/           консольные утилиты (kdr-license: выпуск лицензий без сервера)
 tests/api/       Vitest: REST API
 tests/e2e/       Playwright: сценарии в браузере
 ```
@@ -170,7 +172,7 @@ E2E поднимают отдельный сервер на изолирован
 ```bash
 cd src-tauri
 cargo test --lib                    # 75 тестов: приёмочные проверки LICENSING.md с подменой времени и железа
-cargo test --lib -- --ignored e2e   # сквозные: против утилиты hrd-license и настоящего сервера (нужен Node 22.18+)
+cargo test --lib -- --ignored e2e   # сквозные: против утилиты kdr-license и настоящего сервера (нужен Node 22.18+)
 ```
 
 Сервер лицензий — `npm test` в `license-server` (55 тестов).

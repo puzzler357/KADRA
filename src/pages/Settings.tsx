@@ -147,7 +147,7 @@ export default function Settings() {
     try {
       const payload = await api.exportBackup();
       const rows = Object.values(payload.data).reduce((sum, list) => sum + list.length, 0);
-      const fileName = `hrdesk-backup-${payload.createdAt.slice(0, 19).replace(/[:T]/g, '-')}.json`;
+      const fileName = `kadra-backup-${payload.createdAt.slice(0, 19).replace(/[:T]/g, '-')}.json`;
 
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);

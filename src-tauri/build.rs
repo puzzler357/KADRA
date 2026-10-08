@@ -1,7 +1,7 @@
 fn main() {
     // A release build that trusts no signing key rejects every licence and
     // opens every customer's database read-only. Stop it here instead: run
-    // `node tools/hrd-license keygen --kid hrd-2026-1` and the key lands in
+    // `node tools/kdr-license keygen --kid kdr-2026-1` and the key lands in
     // license-keys.json. (The dev key in license-keys.dev.json is compiled
     // into debug builds only.)
     println!("cargo:rerun-if-changed=license-keys.json");
@@ -26,7 +26,7 @@ fn main() {
         if !listed {
             panic!(
                 "license-keys.json lists no release signing key. \
-                 Generate one with `node tools/hrd-license keygen --kid hrd-2026-1` before a release build."
+                 Generate one with `node tools/kdr-license keygen --kid kdr-2026-1` before a release build."
             );
         }
     }

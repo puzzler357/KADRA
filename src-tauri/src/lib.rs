@@ -19,7 +19,7 @@ fn get_app_version() -> String {
 /// Opens the database where tauri-plugin-sql kept it.
 ///
 /// The plugin resolved `sqlite:local-hr-docs.db` against app_config_dir(),
-/// which on Windows is %APPDATA%\com.hrdesk.local. Any other directory
+/// which on Windows is %APPDATA%\com.kadra.local. Any other directory
 /// (app_local_data_dir() is %LOCALAPPDATA%) would start every existing
 /// installation on an empty database without a word.
 fn open_database(app: &tauri::App) -> Result<Arc<db::Database>, String> {

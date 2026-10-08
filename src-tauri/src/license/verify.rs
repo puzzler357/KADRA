@@ -13,7 +13,7 @@ use serde_json::Value;
 use super::keys::KeyRing;
 use super::model::{Envelope, LicensePayload, SignedStatus};
 
-pub const PRODUCT: &str = "HRDESK";
+pub const PRODUCT: &str = "KADRA";
 pub const FORMAT_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -124,8 +124,8 @@ mod tests {
     use super::*;
     use crate::license::keys::{KeyRing, DEV_KID};
 
-    const LICENSE: &str = r#"{"v":1,"license_id":"HRD-2026-000001","revision":1,
-        "customer_id":"C1","customer_name":"ABC","product":"HRDESK","plan":"ANNUAL",
+    const LICENSE: &str = r#"{"v":1,"license_id":"KDR-2026-000001","revision":1,
+        "customer_id":"C1","customer_name":"ABC","product":"KADRA","plan":"ANNUAL",
         "activation_mode":"OFFLINE","seats":1,
         "activation":{"activation_id":"ACT-1","device_name":"PC","device_pubkey":"x",
           "fp":{"mg":"a","smbios":"b","disk":"c"},"fp_threshold":2},
@@ -137,7 +137,7 @@ mod tests {
         let key = signing_key(1);
         let ring = KeyRing::with("k1", key.verifying_key());
         let license = verify_license(&seal("k1", &key, LICENSE.as_bytes()), &ring).unwrap();
-        assert_eq!(license.license_id, "HRD-2026-000001");
+        assert_eq!(license.license_id, "KDR-2026-000001");
     }
 
     // Test 1: one byte changed in the payload.
@@ -188,7 +188,7 @@ mod tests {
     fn other_products_and_versions_are_rejected() {
         let key = signing_key(1);
         let ring = KeyRing::with("k1", key.verifying_key());
-        let other = LICENSE.replace("\"product\":\"HRDESK\"", "\"product\":\"XYZ\"");
+        let other = LICENSE.replace("\"product\":\"KADRA\"", "\"product\":\"XYZ\"");
         assert!(verify_license(&seal("k1", &key, other.as_bytes()), &ring).is_err());
         let v2 = LICENSE.replacen("\"v\":1", "\"v\":2", 1);
         assert!(verify_license(&seal("k1", &key, v2.as_bytes()), &ring).is_err());
@@ -199,8 +199,8 @@ mod tests {
     #[cfg(debug_assertions)]
     #[test]
     fn a_file_signed_by_the_utility_verifies() {
-        let bytes = include_bytes!("../../tests/fixtures/utility-signed.hrdlic");
+        let bytes = include_bytes!("../../tests/fixtures/utility-signed.kdrlic");
         let license = verify_license(bytes, &KeyRing::embedded()).unwrap();
-        assert_eq!(license.product, "HRDESK");
+        assert_eq!(license.product, "KADRA");
     }
 }

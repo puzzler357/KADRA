@@ -1,4 +1,4 @@
-# Сервер лицензий HRDesk и License Manager
+# Сервер лицензий KADRA и License Manager
 
 Учёт клиентов, лицензий и компьютеров в одном месте, выпуск файлов лицензий и
 веб-панель License Manager. Правила, форматы и нумерация разделов, на которую
@@ -19,9 +19,9 @@ SQLite через встроенный `node:sqlite`. Нативных зави�
   Ключ лицензии показывается один раз, на сервере хранится только его хэш.
   MONTHLY + OFFLINE создать нельзя (2.1).
 - **Компьютеры**: список, последняя связь, выпуск нового файла, файл
-  разблокировки часов `.hrdclock`, освобождение места.
-- **Офлайн-файлы**: загрузить `.hrdreq` или `.hrddeact`, увидеть, что просит
-  клиент, одобрить, скачать `.hrdlic`. Перенос на другой компьютер — только с
+  разблокировки часов `.kdrclock`, освобождение места.
+- **Офлайн-файлы**: загрузить `.kdrreq` или `.kdrdeact`, увидеть, что просит
+  клиент, одобрить, скачать `.kdrlic`. Перенос на другой компьютер — только с
   явным одобрением и с учётом лимита переносов в год.
 - **Продление офлайн-клиента одной кнопкой**: новые файлы для всех его
   компьютеров скачиваются сразу, запрос от клиента не нужен (5.3).
@@ -39,7 +39,7 @@ SQLite через встроенный `node:sqlite`. Нативных зави�
 
 ## Клиентская половина
 
-Проверка лицензии в самом HRDesk живёт в Rust: `src-tauri/src/license/` (подпись,
+Проверка лицензии в самом KADRA живёт в Rust: `src-tauri/src/license/` (подпись,
 отпечаток, ключ устройства, часы, состояние, обмен файлами и с этим сервером) и
 `src-tauri/src/db/` (база под охраной режима «только чтение»). В окне —
 вкладка «Настройки → Лицензия», экран активации и баннеры. Подробности — раздел 9
@@ -51,7 +51,7 @@ SQLite через встроенный `node:sqlite`. Нативных зави�
 cd license-server
 npm install
 npm run admin -- add owner          # пароль и секрет для приложения-аутентификатора
-HRD_DEV_SIGNING=1 INSECURE_COOKIE=1 npm start
+KDR_DEV_SIGNING=1 INSECURE_COOKIE=1 npm start
 # → http://127.0.0.1:8787/admin/
 ```
 
@@ -59,22 +59,22 @@ HRD_DEV_SIGNING=1 INSECURE_COOKIE=1 npm start
 [.env.dev](.env.dev) — отладочная подпись, та же база, что у консольной
 утилиты с `--dev`, и cookie без требования HTTPS.
 
-`HRD_DEV_SIGNING=1` подписывает отладочным ключом. Для настоящих лицензий нужен
-свой ключ: `node tools/hrd-license keygen --kid hrd-2026-1`.
+`KDR_DEV_SIGNING=1` подписывает отладочным ключом. Для настоящих лицензий нужен
+свой ключ: `node tools/kdr-license keygen --kid kdr-2026-1`.
 
 ## Развёртывание на сервере
 
 1. Node.js 22.18 или новее, `npm ci --omit=dev` в каталоге `license-server/`.
-2. Закрытый ключ подписи (`~/.hrd-license/keys/<kid>.key`, зашифрованный) — на
+2. Закрытый ключ подписи (`~/.kdr-license/keys/<kid>.key`, зашифрованный) — на
    сервер, права `600`, владелец — пользователь сервиса.
 3. Переменные окружения (например, в unit-файле systemd):
 
    | Переменная | Значение |
    | --- | --- |
-   | `HRD_LICENSE_DB` | путь к базе, например `/var/lib/hrd-license/license.db` |
-   | `HRD_SIGNING_KEY` | путь к закрытому ключу |
-   | `HRD_SIGNING_KID` | его `kid`, например `hrd-2026-1` |
-   | `HRD_SIGNING_PASSPHRASE` | пароль ключа |
+   | `KDR_LICENSE_DB` | путь к базе, например `/var/lib/kdr-license/license.db` |
+   | `KDR_SIGNING_KEY` | путь к закрытому ключу |
+   | `KDR_SIGNING_KID` | его `kid`, например `kdr-2026-1` |
+   | `KDR_SIGNING_PASSPHRASE` | пароль ключа |
    | `PORT`, `HOST` | по умолчанию `8787` на `127.0.0.1` |
    | `TRUST_PROXY` | число прокси перед сервером, по умолчанию `1` |
 
@@ -84,9 +84,9 @@ HRD_DEV_SIGNING=1 INSECURE_COOKIE=1 npm start
 6. Резервная копия базы — ежедневно (`sqlite3 license.db ".backup ..."`), и
    отдельно две копии закрытого ключа на разных носителях (3.3).
 
-## Сборка HRDesk под этот сервер
+## Сборка KADRA под этот сервер
 
-Адрес сервера вшивается в HRDesk при сборке:
+Адрес сервера вшивается в KADRA при сборке:
 
 ```sh
 LICENSE_SERVER_URL=https://license.<ваш домен>/v1 npm run tauri:build
@@ -96,7 +96,7 @@ LICENSE_SERVER_URL=https://license.<ваш домен>/v1 npm run tauri:build
 
 Без этой переменной или с адресом не на `https://` релизная сборка остановится;
 остановится она и без релизного ключа в `src-tauri/license-keys.json`
-(`node tools/hrd-license keygen --kid hrd-2026-1`). Отладочная сборка
+(`node tools/kdr-license keygen --kid kdr-2026-1`). Отладочная сборка
 (`npm run tauri:dev`) по умолчанию ходит на `http://127.0.0.1:8787/v1` — то есть
 на этот сервер, запущенный локально через `npm run dev` — и принимает файлы,
 подписанные dev-ключом.
@@ -117,12 +117,12 @@ LICENSE_SERVER_URL=https://license.<ваш домен>/v1 npm run tauri:build
 ```
 POST /v1/payments/<имя>
 Content-Type: application/json
-X-HRD-Signature: t=<время, unix-секунды>,v1=<hex HMAC-SHA256(секрет, "<t>.<тело запроса>")>
+X-KDR-Signature: t=<время, unix-секунды>,v1=<hex HMAC-SHA256(секрет, "<t>.<тело запроса>")>
 
 {
   "payment_id": "уникальный номер платежа у отправителя",   обязательно
-  "license_id": "HRD-2026-000001",                        или license_key
-  "license_key": "HRD-XXXXX-XXXXX-XXXXX-XXXXX",
+  "license_id": "KDR-2026-000001",                        или license_key
+  "license_key": "KDR-XXXXX-XXXXX-XXXXX-XXXXX",
   "periods": 1,                                           оплаченных периодов тарифа, по умолчанию 1
   "amount": 1200, "currency": "TMT",                      для учёта, необязательно
   "paid_at": "2026-10-01T09:30:00Z"                       фактическая дата оплаты, по умолчанию — сейчас
@@ -147,12 +147,12 @@ X-HRD-Signature: t=<время, unix-секунды>,v1=<hex HMAC-SHA256(сек�
 
 ```js
 import crypto from 'node:crypto';
-const body = JSON.stringify({ payment_id: 'INV-1042', license_id: 'HRD-2026-000001', periods: 1, amount: 1200, currency: 'TMT' });
+const body = JSON.stringify({ payment_id: 'INV-1042', license_id: 'KDR-2026-000001', periods: 1, amount: 1200, currency: 'TMT' });
 const t = Math.floor(Date.now() / 1000);
 const v1 = crypto.createHmac('sha256', SECRET).update(`${t}.${body}`).digest('hex');
 await fetch('https://license.example.com/v1/payments/bank', {
   method: 'POST',
-  headers: { 'Content-Type': 'application/json', 'X-HRD-Signature': `t=${t},v1=${v1}` },
+  headers: { 'Content-Type': 'application/json', 'X-KDR-Signature': `t=${t},v1=${v1}` },
   body
 });
 ```
@@ -160,11 +160,11 @@ await fetch('https://license.example.com/v1/payments/bank', {
 **Командная строка (bash + openssl):**
 
 ```sh
-BODY='{"payment_id":"INV-1042","license_id":"HRD-2026-000001"}'
+BODY='{"payment_id":"INV-1042","license_id":"KDR-2026-000001"}'
 T=$(date +%s)
 V1=$(printf '%s.%s' "$T" "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | sed 's/^.* //')
 curl -X POST https://license.example.com/v1/payments/bank \
-  -H 'Content-Type: application/json' -H "X-HRD-Signature: t=$T,v1=$V1" -d "$BODY"
+  -H 'Content-Type: application/json' -H "X-KDR-Signature: t=$T,v1=$V1" -d "$BODY"
 ```
 
 Если платёжная система шлёт уведомления в своём формате и со своей подписью,
@@ -173,22 +173,22 @@ curl -X POST https://license.example.com/v1/payments/bank \
 
 ## Утилита вместо сервера
 
-`node tools/hrd-license` делает то же из консоли на вашем компьютере (выпуск,
+`node tools/kdr-license` делает то же из консоли на вашем компьютере (выпуск,
 продление, разблокировка, деактивация) тем же кодом и в базе того же формата.
-Переезд на сервер — скопировать `~/.hrd-license/license.db` в `HRD_LICENSE_DB`.
+Переезд на сервер — скопировать `~/.kdr-license/license.db` в `KDR_LICENSE_DB`.
 
 ```sh
-node tools/hrd-license keygen --kid hrd-2026-1
-node tools/hrd-license customer --name "ООО Ромашка" --email hr@romashka.tm
-node tools/hrd-license license --customer CUST-000001 --plan ANNUAL --mode OFFLINE
-node tools/hrd-license issue --request клиент.hrdreq --out .
-node tools/hrd-license inspect HRD-2026-000001_ACT-xxxxxxxx_r1.hrdlic
-node tools/hrd-license list
+node tools/kdr-license keygen --kid kdr-2026-1
+node tools/kdr-license customer --name "ООО Ромашка" --email hr@romashka.tm
+node tools/kdr-license license --customer CUST-000001 --plan ANNUAL --mode OFFLINE
+node tools/kdr-license issue --request клиент.kdrreq --out .
+node tools/kdr-license inspect KDR-2026-000001_ACT-xxxxxxxx_r1.kdrlic
+node tools/kdr-license list
 ```
 
-Полный список команд — в начале [tools/hrd-license/cli.js](../tools/hrd-license/cli.js).
-Ключ подписи по умолчанию ищется в `~/.hrd-license/keys/<kid>.key`, пароль — в
-`HRD_LICENSE_PASSPHRASE` или спрашивается. Флаг `--dev` берёт отладочный ключ и
+Полный список команд — в начале [tools/kdr-license/cli.js](../tools/kdr-license/cli.js).
+Ключ подписи по умолчанию ищется в `~/.kdr-license/keys/<kid>.key`, пароль — в
+`KDR_LICENSE_PASSPHRASE` или спрашивается. Флаг `--dev` берёт отладочный ключ и
 отдельную базу.
 
 ## Проверки

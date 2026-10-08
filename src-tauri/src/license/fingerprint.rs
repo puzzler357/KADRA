@@ -1,5 +1,5 @@
 //! Device fingerprint (4.1): three components, each stored only as
-//! `SHA-256("HRD-fp-v1" + value)`. The raw values never leave the machine.
+//! `SHA-256("KDR-fp-v1" + value)`. The raw values never leave the machine.
 //!
 //! It is recomputed on every start and never cached on disk: a stored
 //! identifier would simply be copied along with everything else.
@@ -24,7 +24,7 @@ pub fn hash_component(value: Option<&str>) -> String {
         return String::new();
     };
     let mut hasher = Sha256::new();
-    hasher.update(b"HRD-fp-v1");
+    hasher.update(b"KDR-fp-v1");
     hasher.update(value.as_bytes());
     hasher
         .finalize()

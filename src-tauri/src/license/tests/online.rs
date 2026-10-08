@@ -206,7 +206,7 @@ struct Online {
     client: Client,
 }
 
-const KEY: &str = "HRD-AAAAA-BBBBB-CCCCC-DDDDD";
+const KEY: &str = "KDR-AAAAA-BBBBB-CCCCC-DDDDD";
 
 /// A MONTHLY ONLINE licence activated over the network at START, paid for 30 days.
 fn online() -> Online {
@@ -405,7 +405,7 @@ fn t24_online_state_missing_is_restored_by_the_server() {
     };
     // A file for another licence of this device, put in place by hand.
     let foreign = Terms {
-        license_id: "HRD-2026-000900",
+        license_id: "KDR-2026-000900",
         ..online_terms(at(START), at(START) + Duration::days(30), "MONTHLY", 1)
     };
     std::fs::write(
@@ -556,7 +556,7 @@ fn e2e_online_over_http() {
     let cli = |args: &[&str]| -> String {
         let output = Command::new("node")
             .current_dir(&repo)
-            .arg("tools/hrd-license/cli.js")
+            .arg("tools/kdr-license/cli.js")
             .args(args)
             .args(["--dev", "--db", db.to_str().unwrap()])
             .output()
@@ -604,8 +604,8 @@ fn e2e_online_over_http() {
             .current_dir(repo.join("license-server"))
             .arg("src/server.ts")
             .env("PORT", port.to_string())
-            .env("HRD_LICENSE_DB", &db)
-            .env("HRD_DEV_SIGNING", "1")
+            .env("KDR_LICENSE_DB", &db)
+            .env("KDR_DEV_SIGNING", "1")
             .env("INSECURE_COOKIE", "1")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -621,7 +621,7 @@ fn e2e_online_over_http() {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     std::env::set_var(
-        "HRD_LICENSE_SERVER_URL",
+        "KDR_LICENSE_SERVER_URL",
         format!("http://127.0.0.1:{port}/v1"),
     );
 

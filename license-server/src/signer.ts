@@ -13,21 +13,21 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Signer } from './core/envelope.ts';
 
-const DEV_KEY = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../tools/hrd-license/dev/dev.key');
+const DEV_KEY = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../tools/kdr-license/dev/dev.key');
 
 export function loadSigner(env: NodeJS.ProcessEnv = process.env): Signer | null {
-  if (env.HRD_DEV_SIGNING === '1') {
+  if (env.KDR_DEV_SIGNING === '1') {
     // The development key, whose public half is in
-    // src-tauri/license-keys.dev.json: a key a release build of HRDesk is
+    // src-tauri/license-keys.dev.json: a key a release build of KADRA is
     // not meant to carry, so files signed with it are for testing only.
     return { kid: 'dev', key: crypto.createPrivateKey(fs.readFileSync(DEV_KEY)) };
   }
-  const file = env.HRD_SIGNING_KEY;
-  const kid = env.HRD_SIGNING_KID;
+  const file = env.KDR_SIGNING_KEY;
+  const kid = env.KDR_SIGNING_KID;
   if (!file || !kid) return null;
   const key = crypto.createPrivateKey({
     key: fs.readFileSync(file),
-    passphrase: env.HRD_SIGNING_PASSPHRASE ?? ''
+    passphrase: env.KDR_SIGNING_PASSPHRASE ?? ''
   });
   if (key.asymmetricKeyType !== 'ed25519') throw new Error(`${file} is not an Ed25519 key`);
   return { kid, key };

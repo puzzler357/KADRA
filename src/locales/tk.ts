@@ -1,10 +1,10 @@
 export const tk = {
   translation: {
-    app_name: "HRDesk",
+    app_name: "KADRA",
     license: {
       title: "Ygtyýarnama",
       subtitle: "Bu kompýuteriň ygtyýarnama ýagdaýy, satyjy bilen alyş-çalyş faýllary we öçürmek.",
-      webOnly: "Ygtyýarnama diňe HRDesk-iň iş stoly wersiýasynda ulanylýar. Brauzerdäki işläp düzmek tertibinde barlag ýok.",
+      webOnly: "Ygtyýarnama diňe KADRA-iň iş stoly wersiýasynda ulanylýar. Brauzerdäki işläp düzmek tertibinde barlag ýok.",
       loading: "Ygtyýarnama maglumatlary ýüklenýär…",
       never: "—",
       perpetual: "möhletsiz",
@@ -19,9 +19,9 @@ export const tk = {
         computer: "Kompýuter",
         paidUntil: "Tölenen möhleti",
         leaseUntil: "Faýl hereket edýär",
-        maxVersion: "HRDesk wersiýalary",
+        maxVersion: "KADRA wersiýalary",
         lastCheck: "Soňky barlag",
-        appVersion: "HRDesk wersiýasy"
+        appVersion: "KADRA wersiýasy"
       },
       plan: {
         PERPETUAL: "Möhletsiz",
@@ -36,12 +36,12 @@ export const tk = {
       state: {
         ACTIVE: "Ygtyýarnama hereket edýär.",
         GRACE: "Abuna möhleti gutardy, ýeňillik günleri dowam edýär.",
-        UNLICENSED: "HRDesk işjeňleşdirilmedik.",
+        UNLICENSED: "KADRA işjeňleşdirilmedik.",
         INVALID: "Ygtyýarnama faýly zeperlenen ýa-da näbelli açar bilen gol çekilen.",
         MACHINE_MISMATCH: "Ygtyýarnama başga kompýuter üçin berlen.",
         REBIND_REQUIRED: "Bu kompýutere gaýtadan baglamak gerek: haýyş faýlyny dörediň we satyja iberiň.",
         STATE_MISSING: "Ygtyýarnamanyň ýagdaýyny okap bolmady.",
-        VERSION_NOT_COVERED: "HRDesk-iň bu wersiýasy ygtyýarnama girmeýär.",
+        VERSION_NOT_COVERED: "KADRA-iň bu wersiýasy ygtyýarnama girmeýär.",
         CLOCK_ROLLBACK: "Kompýuteriň sagady soňky belli wagtdan yzda. Senäni we wagty düzediň.",
         REVOKED: "Ygtyýarnama ýatyryldy.",
         EXPIRED: "Abuna möhleti gutardy. Işi dowam etmek üçin uzaltmak gerek.",
@@ -67,29 +67,29 @@ export const tk = {
         close: "Ýap"
       },
       activate: {
-        title: "HRDesk-i işjeňleşdirmek",
+        title: "KADRA-i işjeňleşdirmek",
         subtitle: "Satyjydan alan ygtyýarnama açaryňyzy giriziň. Internetsiz faýl alyşmak arkaly işjeňleşdirip bolýar.",
         key: "Ygtyýarnama açary",
         offlineTitle: "Internetsiz — faýl alyşmak arkaly",
         step1: "1. Haýyş faýlyny ýatda saklaň (açar ýokarda girizildi).",
         step2: "2. Haýyş faýlyny satyja iberiň we ygtyýarnama faýlyny alyň.",
-        step3: "3. Alnan ygtyýarnama faýlyny (.hrdlic) import ediň."
+        step3: "3. Alnan ygtyýarnama faýlyny (.kdrlic) import ediň."
       },
       deactivate: {
         title: "Bu kompýuteri öçürmelimi?",
-        desc: "HRDesk tassyklama faýlyny (.hrddeact) ýatda saklar we ygtyýarnamany bu kompýuterden aýyrar. Başga kompýuter üçin orny boşatmak üçin faýly satyja iberiň. Maglumatlar görmek üçin elýeterli galar.",
-        descOnline: "Serwer bu kompýuteriň ornuny boşadar we ygtyýarnama ondan aýrylar. Internetsiz tassyklama faýlyny (.hrddeact) döredip satyja iberip bilersiňiz. Maglumatlar görmek üçin elýeterli galar."
+        desc: "KADRA tassyklama faýlyny (.kdrdeact) ýatda saklar we ygtyýarnamany bu kompýuterden aýyrar. Başga kompýuter üçin orny boşatmak üçin faýly satyja iberiň. Maglumatlar görmek üçin elýeterli galar.",
+        descOnline: "Serwer bu kompýuteriň ornuny boşadar we ygtyýarnama ondan aýrylar. Internetsiz tassyklama faýlyny (.kdrdeact) döredip satyja iberip bilersiňiz. Maglumatlar görmek üçin elýeterli galar."
       },
       dialog: {
         saveRequest: "Haýyş faýlyny ýatda sakla",
         saveProof: "Öçürmegiň tassyklama faýlyny ýatda sakla",
-        openLicense: "Ygtyýarnama (.hrdlic) ýa-da açmak (.hrdclock) faýlyny saýlaň"
+        openLicense: "Ygtyýarnama (.kdrlic) ýa-da açmak (.kdrclock) faýlyny saýlaň"
       },
       msg: {
         imported: "Ygtyýarnama faýly oturdyldy",
         requestSaved: "Haýyş faýly ýatda saklandy",
         checked: "Ygtyýarnama barlandy",
-        activated: "HRDesk işjeňleşdirildi",
+        activated: "KADRA işjeňleşdirildi",
         deactivated: "Kompýuter öçürildi, tassyklama faýly ýatda saklandy",
         deactivatedOnline: "Kompýuter öçürildi, orun boşadyldy"
       }

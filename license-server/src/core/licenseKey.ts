@@ -1,5 +1,5 @@
 /**
- * Licence keys, `HRD-XXXXX-XXXXX-XXXXX-XXXXX` (10.1).
+ * Licence keys, `KDR-XXXXX-XXXXX-XXXXX-XXXXX` (10.1).
  *
  * Crockford base32, so the characters people confuse (O/0, I/L/1) read the
  * same. The last character is a Luhn mod 32 check symbol: a mistyped key is
@@ -31,7 +31,7 @@ function checkSymbol(body: string): string {
 }
 
 function group(chars: string): string {
-  return `HRD-${chars.match(/.{5}/g)!.join('-')}`;
+  return `KDR-${chars.match(/.{5}/g)!.join('-')}`;
 }
 
 export function generateLicenseKey(): string {
@@ -46,9 +46,9 @@ export function generateLicenseKey(): string {
  */
 export function normalizeLicenseKey(input: string): string | null {
   let chars = input.toUpperCase().replace(/[\s-]/g, '');
-  // The prefix is optional, and the body itself may start with "HRD", so it
+  // The prefix is optional, and the body itself may start with "KDR", so it
   // is recognised by length rather than by its letters.
-  if (chars.length === RANDOM_CHARS + 1 + 3 && chars.startsWith('HRD')) chars = chars.slice(3);
+  if (chars.length === RANDOM_CHARS + 1 + 3 && chars.startsWith('KDR')) chars = chars.slice(3);
   chars = chars.replace(/O/g, '0').replace(/[IL]/g, '1');
   if (chars.length !== RANDOM_CHARS + 1) return null;
   if ([...chars].some(c => !ALPHABET.includes(c))) return null;
@@ -57,5 +57,5 @@ export function normalizeLicenseKey(input: string): string | null {
 }
 
 export function hashLicenseKey(normalized: string): string {
-  return crypto.createHash('sha256').update(`HRD-key-v1:${normalized}`).digest('hex');
+  return crypto.createHash('sha256').update(`KDR-key-v1:${normalized}`).digest('hex');
 }

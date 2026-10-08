@@ -26,7 +26,7 @@ describe('licence keys', () => {
   test('a generated key survives the ways people retype it', () => {
     for (let i = 0; i < 200; i++) {
       const key = generateLicenseKey();
-      assert.match(key, /^HRD-[0-9A-Z]{5}-[0-9A-Z]{5}-[0-9A-Z]{5}-[0-9A-Z]{5}$/);
+      assert.match(key, /^KDR-[0-9A-Z]{5}-[0-9A-Z]{5}-[0-9A-Z]{5}-[0-9A-Z]{5}$/);
       assert.equal(normalizeLicenseKey(key), key);
       assert.equal(normalizeLicenseKey(key.toLowerCase().replace(/-/g, ' ')), key);
       assert.equal(normalizeLicenseKey(key.slice(4)), key, 'without the prefix');
@@ -308,7 +308,7 @@ describe('revocation, clock reset, forgery', () => {
     assert.equal(opened.payload.kind, 'CLOCK_RESET');
     assert.equal(opened.payload.revision, 2);
     assert.equal(opened.payload.high_water_to, '2026-09-27T00:00:00Z');
-    assert.equal(reset.filename.endsWith('.hrdclock'), true);
+    assert.equal(reset.filename.endsWith('.kdrclock'), true);
   });
 
   test('a request with a forged signature is refused and journalled', () => {

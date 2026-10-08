@@ -1,7 +1,7 @@
 /**
  * HTTP surface of the licence server (5.2, 10.2).
  *
- * /v1/activate, /v1/refresh,   the HRDesk client, authenticated by device signature
+ * /v1/activate, /v1/refresh,   the KADRA client, authenticated by device signature
  * /v1/rebind, /v1/deactivate
  * /v1/payments/<source>        payment webhooks, signed with the source's secret
  * /v1/offline/*                offline request files, License Manager only
@@ -73,9 +73,9 @@ export function createApp(service: LicenseService, options: AppOptions = {}) {
   app.get('/', (_req, res) => res.redirect('/admin/'));
   app.use('/admin', express.static(PUBLIC_DIR, { index: 'index.html', maxAge: 0 }));
 
-  // ------------------------------------------------- the HRDesk client (5.2)
+  // ------------------------------------------------- the KADRA client (5.2)
 
-  // Signed requests from HRDesk itself: no session, the device signature is the
+  // Signed requests from KADRA itself: no session, the device signature is the
   // credential. Answers other than a signed file or status change nothing on
   // the client, so errors here are plain JSON.
   route('post', '/v1/activate', rateLimit({ name: 'activate', windowMs: 60 * 60_000, max: 20 }),
@@ -92,7 +92,7 @@ export function createApp(service: LicenseService, options: AppOptions = {}) {
   // Signed by the sender's own secret (src/payments.ts has the contract).
   route('post', '/v1/payments/:source', rateLimit({ name: 'payments', windowMs: 60_000, max: 120 }),
     req => handlePaymentWebhook(service, String(req.params.source),
-      (req as Request & { rawBody?: Buffer }).rawBody, req.get('X-HRD-Signature')));
+      (req as Request & { rawBody?: Buffer }).rawBody, req.get('X-KDR-Signature')));
 
   // ------------------------------------------------------------ sign-in
 
@@ -119,7 +119,7 @@ export function createApp(service: LicenseService, options: AppOptions = {}) {
       res.status(401).json({ error: 'UNAUTHENTICATED', message: 'Требуется вход' });
       return;
     }
-    if (req.method !== 'GET' && req.get('X-HRD-LM') !== '1') {
+    if (req.method !== 'GET' && req.get('X-KDR-LM') !== '1') {
       res.status(403).json({ error: 'CSRF', message: 'Запрос отклонён' });
       return;
     }
@@ -177,7 +177,7 @@ export function createApp(service: LicenseService, options: AppOptions = {}) {
 
   // ------------------------------------------------------ offline files (5.1)
 
-  /** What a .hrdreq / .hrddeact asks for; changes nothing. */
+  /** What a .kdrreq / .kdrdeact asks for; changes nothing. */
   route('post', '/v1/offline/inspect', (req, res) => service.inspectRequest(req.body?.request, {
     actor: actor(res),
     transferFrom: req.body?.transfer_from || undefined,

@@ -1,8 +1,8 @@
 {
-  "name": "hrdesk-license-server",
+  "name": "kadra-license-server",
   "private": true,
   "type": "module",
-  "description": "HRDesk licence server and License Manager (see README.md)",
+  "description": "KADRA licence server and License Manager (see README.md)",
   "engines": {
     "node": ">=22.18"
   },

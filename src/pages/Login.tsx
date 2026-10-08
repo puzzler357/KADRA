@@ -95,8 +95,9 @@ export default function Login() {
       </div>
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
-        <h2 className="mt-6 text-center text-3xl font-bold tracking-tight text-accent-600 dark:text-accent-400">
-          {t('app_name')}
+        <h2 className="mt-6 flex justify-center">
+          <img src="/brand/kadra-logo.png" alt={t('app_name')} className="h-24 w-auto dark:hidden" />
+          <img src="/brand/kadra-logo-light.png" alt={t('app_name')} className="h-24 w-auto hidden dark:block" />
         </h2>
         <p className="mt-2 text-center text-sm text-muted">
           {needsSetup ? t('login.setupSubtitle') : t('login.subtitle')}

@@ -69,7 +69,7 @@ fn save_path(
         .file()
         .set_title(title)
         .set_file_name(file_name)
-        .add_filter("HRDesk", &[extension])
+        .add_filter("KADRA", &[extension])
         .blocking_save_file()
         .map(|path| path.into_path().map_err(|e| e.to_string()))
         .transpose()
@@ -79,7 +79,7 @@ fn open_path(app: &AppHandle, title: &str) -> OpResult<Option<PathBuf>> {
     app.dialog()
         .file()
         .set_title(title)
-        .add_filter("HRDesk", &["hrdlic", "hrdclock"])
+        .add_filter("KADRA", &["kdrlic", "kdrclock"])
         .blocking_pick_file()
         .map(|path| path.into_path().map_err(|e| e.to_string()))
         .transpose()
@@ -146,12 +146,12 @@ pub async fn license_export_request(
     title: String,
 ) -> OpResult<Option<StatusView>> {
     let (kind, file_name) = match kind.as_str() {
-        "ACTIVATE" => (RequestType::Activate, "activation_request.hrdreq"),
-        "REBIND" => (RequestType::Rebind, "rebind_request.hrdreq"),
+        "ACTIVATE" => (RequestType::Activate, "activation_request.kdrreq"),
+        "REBIND" => (RequestType::Rebind, "rebind_request.kdrreq"),
         other => return Err(format!("Неизвестный тип запроса {other}")),
     };
     blocking(&manager, move |m| {
-        let Some(path) = save_path(&app, &title, file_name, "hrdreq")? else {
+        let Some(path) = save_path(&app, &title, file_name, "kdrreq")? else {
             return Ok(None);
         };
         m.export_request(kind, license_key, &path).map(Some)
@@ -159,7 +159,7 @@ pub async fn license_export_request(
     .await
 }
 
-/// A `.hrdlic` or `.hrdclock` from the seller. `None`: cancelled.
+/// A `.kdrlic` or `.kdrclock` from the seller. `None`: cancelled.
 #[tauri::command]
 pub async fn license_import(
     app: AppHandle,
@@ -175,7 +175,7 @@ pub async fn license_import(
     .await
 }
 
-/// 7.2. `online`: the server frees the seat itself. Otherwise the `.hrddeact`
+/// 7.2. `online`: the server frees the seat itself. Otherwise the `.kdrdeact`
 /// proof is written for the seller first, and only then is the licence
 /// removed. `None`: the save dialog was cancelled and nothing changed.
 #[tauri::command]
@@ -189,7 +189,7 @@ pub async fn license_deactivate(
         if online {
             return m.deactivate_online().map(Some);
         }
-        let Some(path) = save_path(&app, &title, "deactivation_proof.hrddeact", "hrddeact")? else {
+        let Some(path) = save_path(&app, &title, "deactivation_proof.kdrdeact", "kdrdeact")? else {
             return Ok(None);
         };
         m.deactivate(&path).map(Some)

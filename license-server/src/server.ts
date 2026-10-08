@@ -1,13 +1,13 @@
 /**
  * Entry point. Configuration comes from the environment:
  *
- *   HRD_LICENSE_DB          database file            (default ./data/license.db)
+ *   KDR_LICENSE_DB          database file            (default ./data/license.db)
  *   PORT / HOST             where to listen          (default 8787 on 127.0.0.1 -
  *                           put nginx or Caddy with HTTPS in front)
- *   HRD_SIGNING_KEY         encrypted PEM from `hrd-license keygen`
- *   HRD_SIGNING_KID         its kid, e.g. hrd-2026-1
- *   HRD_SIGNING_PASSPHRASE  its passphrase
- *   HRD_DEV_SIGNING=1       sign with the dev key instead (debug HRDesk builds only)
+ *   KDR_SIGNING_KEY         encrypted PEM from `kdr-license keygen`
+ *   KDR_SIGNING_KID         its kid, e.g. kdr-2026-1
+ *   KDR_SIGNING_PASSPHRASE  its passphrase
+ *   KDR_DEV_SIGNING=1       sign with the dev key instead (debug KADRA builds only)
  *   TRUST_PROXY             value for Express "trust proxy" (default 1: one proxy)
  *   INSECURE_COOKIE=1       allow the session cookie over plain HTTP (local dev)
  */
@@ -17,7 +17,7 @@ import { openDb } from './db.ts';
 import { LicenseService } from './service.ts';
 import { loadSigner } from './signer.ts';
 
-const db = openDb(process.env.HRD_LICENSE_DB ?? 'data/license.db');
+const db = openDb(process.env.KDR_LICENSE_DB ?? 'data/license.db');
 const signer = loadSigner();
 if (!signer) console.warn('[license-server] no signing key: files cannot be issued until one is configured');
 else console.log(`[license-server] signing with kid "${signer.kid}"`);

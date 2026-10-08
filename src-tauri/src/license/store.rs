@@ -1,6 +1,6 @@
 //! Where licensing keeps its data (9.1): the licence file and `state.bin`
-//! under `%APPDATA%\com.hrdesk.local\license\`, and a DPAPI-protected vault
-//! in `HKCU\Software\HRDesk\License`.
+//! under `%APPDATA%\com.kadra.local\license\`, and a DPAPI-protected vault
+//! in `HKCU\Software\KADRA\License`.
 //!
 //! The vault holds the device key, the HMAC key for `state.bin`, and the
 //! second copy of the state (6). Keeping the key and the state copy in one
@@ -24,7 +24,7 @@ use super::device_key::{random_key, DeviceKey};
 use super::model::PersistedState;
 use super::platform::Platform;
 
-pub const LICENSE_FILE: &str = "license.hrdlic";
+pub const LICENSE_FILE: &str = "license.kdrlic";
 pub const STATE_FILE: &str = "state.bin";
 
 type HmacSha256 = Hmac<Sha256>;

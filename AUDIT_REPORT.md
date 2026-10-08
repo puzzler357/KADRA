@@ -1,4 +1,4 @@
-# Технический отчёт: аудит UI/UX, дизайн-системы и локализации HRDesk
+# Технический отчёт: аудит UI/UX, дизайн-системы и локализации KADRA
 
 **Дата:** 2026-07-22
 **Объём:** визуальная система (светлая/тёмная темы, цвета, контраст, границы, фоны, единая дизайн-система) + инфраструктура локализации и навигация.
@@ -65,7 +65,7 @@
 ## 4. Исправления локализации
 
 ### Файлы переводов (`ru.ts`, `en.ts`, `tk.ts`)
-- **Единый бренд:** `app_name` приведён к `"HRDesk"` во всех трёх языках (было «HRDesk» / «HR & Docs Platform» / «HR & Docs Platformasy»).
+- **Единый бренд:** `app_name` приведён к `"KADRA"` во всех трёх языках (было «KADRA» / «HR & Docs Platform» / «HR & Docs Platformasy»).
 - **Достигнут паритет ключей** между ru/en/tk (ранее в en/tk отсутствовали `nav.movements`, `nav.calendar` и др.).
 - **Добавлены недостающие ключи навигации:** `recruiting, timeoff, timesheet, onboarding, performance, knowledge_base, generate, archive` (ранее были только частично и хардкодом в Layout).
 - **Расширен `common`:** `add, edit, delete, close, confirm, export, import, back, apply, reset`.

@@ -1,14 +1,14 @@
-# Лицензирование HRDesk
+# Лицензирование KADRA
 
 Техническое задание и справочник к коду лицензирования — обеих половин:
-проверки в самом HRDesk (`src-tauri/src/license/`, `src-tauri/src/db/`, экраны в
-`src/`) и сервера лицензий (`license-server/`, `tools/hrd-license/`).
+проверки в самом KADRA (`src-tauri/src/license/`, `src-tauri/src/db/`, экраны в
+`src/`) и сервера лицензий (`license-server/`, `tools/kdr-license/`).
 Комментарии в коде ссылаются на номера разделов этого файла: «(5.4)» — правило
 продления, «(8.1)» — порядок вычисления состояния, «(10.1)» — таблицы сервера.
 
 Модель перенесена из проекта GAS (`GAS_last`, `LICENSING_SPEC.md` v1.2) без
 изменений по существу; нумерация разделов совпадает, поэтому одно и то же
-правило в обоих проектах называется одним номером. Отличия HRDesk от GAS
+правило в обоих проектах называется одним номером. Отличия KADRA от GAS
 перечислены в 9.4.
 
 Решение заказчика о лицензировании — Р-7 в [TZ.md](TZ.md); как этим
@@ -70,7 +70,7 @@ MONTHLY + OFFLINE создать нельзя: обмениваться файл
 ### 3.1. Конверт
 
 ```json
-{ "kid": "hrd-2026-1", "payload": "<base64url байтов JSON>", "sig": "<base64url Ed25519>" }
+{ "kid": "kdr-2026-1", "payload": "<base64url байтов JSON>", "sig": "<base64url Ed25519>" }
 ```
 
 Подписываются **байты `payload`**, а не «JSON вообще»: получатель сначала
@@ -80,7 +80,7 @@ MONTHLY + OFFLINE создать нельзя: обмениваться файл
 ### 3.2. Содержимое `payload`
 
 `v`, `license_id`, `revision`, `customer_id`, `customer_name`, `product`
-(`HRDESK`), `edition`, `features`, `plan`, `activation_mode`, `seats`,
+(`KADRA`), `edition`, `features`, `plan`, `activation_mode`, `seats`,
 `activation` (`activation_id`, `device_name`, `device_pubkey`, `fp`,
 `fp_threshold`), `issued_at`, `paid_until`, `grace_days`, `lease_until`,
 `refresh_after`, `max_version`.
@@ -111,7 +111,7 @@ Ed25519. Закрытый ключ лежит в зашифрованном PEM,
 | --- | --- | --- |
 | `REVOKED` | лицензия отозвана | `nonce` запроса |
 | `TRANSFERRED` | место освобождено | `nonce` запроса |
-| `CLOCK_RESET` | разблокировка часов, файл `.hrdclock` | `high_water_to` |
+| `CLOCK_RESET` | разблокировка часов, файл `.kdrclock` | `high_water_to` |
 
 Статус тоже расходует ревизию, поэтому каждый принимается один раз.
 
@@ -128,7 +128,7 @@ Ed25519. Закрытый ключ лежит в зашифрованном PEM,
 Одна активация = один компьютер и один профиль Windows. `seats` ограничивает
 число одновременно действующих активаций.
 
-Отпечаток хранится только хэшами `SHA-256("HRD-fp-v1" + значение)`; сырые
+Отпечаток хранится только хэшами `SHA-256("KDR-fp-v1" + значение)`; сырые
 значения компьютер не покидают. Значения-заглушки прошивок (`00000000-…`,
 `FFFFFFFF-…`, «To be filled by O.E.M.») дают пустой хэш и совпадением не
 считаются. Диск — серийный номер физического диска с системным томом, а не
@@ -163,16 +163,16 @@ device_name, device_pubkey, fp, app_version, client_time, counter, nonce
 резервная копия — причина невинная.
 
 Один и тот же файл запроса обрабатывается и онлайн (`/v1/activate`), и офлайн
-(`.hrdreq` через панель) — одним и тем же кодом.
+(`.kdrreq` через панель) — одним и тем же кодом.
 
 ### 5.2. API
 
 | Метод | Для кого | Что делает |
 | --- | --- | --- |
-| `POST /v1/activate` | HRDesk | активация по ключу лицензии |
-| `POST /v1/refresh` | HRDesk | новая аренда или подписанный статус |
-| `POST /v1/rebind` | HRDesk | тот же компьютер после переустановки |
-| `POST /v1/deactivate` | HRDesk | освободить место |
+| `POST /v1/activate` | KADRA | активация по ключу лицензии |
+| `POST /v1/refresh` | KADRA | новая аренда или подписанный статус |
+| `POST /v1/rebind` | KADRA | тот же компьютер после переустановки |
+| `POST /v1/deactivate` | KADRA | освободить место |
 | `POST /v1/payments/<источник>` | платёжная система | уведомление об оплате |
 | `POST /v1/offline/inspect` | панель | что просит файл запроса |
 | `POST /v1/offline/process` | панель | применить и выдать файл |
@@ -206,7 +206,7 @@ device_name, device_pubkey, fp, app_version, client_time, counter, nonce
 Источники `high_water` (берётся максимум):
 
 1. файл состояния `state.bin`, защищённый HMAC (ключ HMAC — под DPAPI);
-2. вторая копия состояния в реестре `HKCU\Software\HRDesk\License`;
+2. вторая копия состояния в реестре `HKCU\Software\KADRA\License`;
 3. `issued_at` последнего полученного файла (время **сервера**);
 4. наибольший `audit_log.ts` — время последней записи журнала аудита.
 
@@ -220,7 +220,7 @@ device_name, device_pubkey, fp, app_version, client_time, counter, nonce
 
 ### 6.1. Ограничение на якорь из базы
 
-**Только записи этого компьютера.** В HRDesk нет синхронизации между
+**Только записи этого компьютера.** В KADRA нет синхронизации между
 компьютерами, поэтому весь журнал написан на этом. Единственный путь чужих
 записей в журнал — восстановление резервной копии с другого компьютера; от
 сильно сбитых часов там защищает ограничение ниже.
@@ -261,7 +261,7 @@ now < high_water − 48 ч   ИЛИ   now < issued_at − 48 ч   →   CLOCK_RO
 
 - часы исправлены на верные — состояние снимается само;
 - ONLINE: успешное обновление с сервера заменяет `high_water` серверным временем;
-- OFFLINE: подписанный файл `.hrdclock` (`kind: CLOCK_RESET`, поле
+- OFFLINE: подписанный файл `.kdrclock` (`kind: CLOCK_RESET`, поле
   `high_water_to`) от продавца, см. 3.4. Файл расходует ревизию, поэтому
   принимается один раз.
 
@@ -296,7 +296,7 @@ now < high_water − 48 ч   ИЛИ   now < issued_at − 48 ч   →   CLOCK_RO
 
 - онлайн: `/v1/deactivate`; только подписанный `TRANSFERRED` с `nonce` этого
   запроса удаляет лицензию и ключ устройства;
-- офлайн: HRDesk сохраняет `deactivation_proof.hrddeact` — запрос `DEACTIVATE`,
+- офлайн: KADRA сохраняет `deactivation_proof.kdrdeact` — запрос `DEACTIVATE`,
   подписанный ключом устройства, — и **только после этого** удаляет лицензию
   и ключ. В состоянии остаётся отметка: тот же файл лицензии повторно не
   импортируется.
@@ -332,7 +332,7 @@ now < high_water − 48 ч   ИЛИ   now < issued_at − 48 ч   →   CLOCK_RO
 3.  отпечаток < 2 из 3                           → MACHINE_MISMATCH
 4.  отпечаток ≥ 2, ключа устройства нет          → REBIND_REQUIRED
 5.  состояния нет или HMAC не сходится           → STATE_MISSING (6.2)
-6.  версия HRDesk > max_version                  → VERSION_NOT_COVERED
+6.  версия KADRA > max_version                  → VERSION_NOT_COVERED
 7.  откат часов (6.3)                            → CLOCK_ROLLBACK
 8.  сервер ранее вернул подписанный REVOKED      → REVOKED
 9.  paid_until ≠ null и now > paid_until + grace → EXPIRED
@@ -377,7 +377,7 @@ now < high_water − 48 ч   ИЛИ   now < issued_at − 48 ч   →   CLOCK_RO
 
 Подозрение снимается кнопкой в панели, с записью в журнал.
 
-## 9. Реализация в HRDesk
+## 9. Реализация в KADRA
 
 ### 9.1. Rust: `src-tauri/src/license/` и `src-tauri/src/db/`
 
@@ -386,22 +386,22 @@ now < high_water − 48 ч   ИЛИ   now < issued_at − 48 ч   →   CLOCK_RO
 | `license/mod.rs` | `LicenseManager`: пересчёт статуса, уведомление окна (`license://changed`) |
 | `license/model.rs` | конверт, лицензия, запрос, статус, состояние на диске |
 | `license/keys.rs` | встроенная связка ключей из `license-keys.json`; `dev` — только в отладочной сборке |
-| `license/verify.rs` | `kid` → подпись над байтами → только потом JSON; продукт `HRDESK` |
+| `license/verify.rs` | `kid` → подпись над байтами → только потом JSON; продукт `KADRA` |
 | `license/fingerprint.rs` | MachineGuid (реестр), SMBIOS UUID и серийный номер системного диска (WMI) |
 | `license/device_key.rs` | пара Ed25519 устройства, подпись запросов |
-| `license/store.rs` | `license.hrdlic`, `state.bin` с HMAC, хранилище под DPAPI в реестре |
+| `license/store.rs` | `license.kdrlic`, `state.bin` с HMAC, хранилище под DPAPI в реестре |
 | `license/clock.rs` | `high_water`, правило отката, якорь с потолком (6) |
 | `license/state.rs` | порядок 8.1 и режим 8.2 |
-| `license/files.rs` | `.hrdreq` наружу, `.hrdlic` и `.hrdclock` внутрь, `.hrddeact` наружу |
+| `license/files.rs` | `.kdrreq` наружу, `.kdrlic` и `.kdrclock` внутрь, `.kdrdeact` наружу |
 | `license/client.rs` | HTTPS к серверу (reqwest + rustls, сертификаты из хранилища Windows, системный прокси) |
 | `license/platform.rs` | всё, что нужно от ОС, за одним трейтом — тесты подменяют время, железо и хранилище |
 | `license/commands.rs` | команды Tauri (ниже) |
-| `db/mod.rs` | единственное соединение `rusqlite` (WAL) с `local-hr-docs.db` в `%APPDATA%\com.hrdesk.local` — там же, где его держал `tauri-plugin-sql` |
+| `db/mod.rs` | единственное соединение `rusqlite` (WAL) с `local-hr-docs.db` в `%APPDATA%\com.kadra.local` — там же, где его держал `tauri-plugin-sql` |
 | `db/schema.rs` | миграции и посев из `src-tauri/schema.json` до вычисления режима |
 | `db/guard.rs` | при режиме, отличном от FULL, проходят только чтения |
 
-Файлы на диске: `%APPDATA%\com.hrdesk.local\license\license.hrdlic` и
-`state.bin`, значение `Vault` в `HKCU\Software\HRDesk\License`.
+Файлы на диске: `%APPDATA%\com.kadra.local\license\license.kdrlic` и
+`state.bin`, значение `Vault` в `HKCU\Software\KADRA\License`.
 
 **Команды Tauri:**
 
@@ -410,9 +410,9 @@ now < high_water − 48 ч   ИЛИ   now < issued_at − 48 ч   →   CLOCK_RO
 | `license_status()` | состояние, режим, даты, причина, `database_empty` — только для отображения |
 | `license_refresh()` | «Проверить лицензию»: онлайн — обмен с сервером, офлайн — перечитать файлы и часы |
 | `license_activate_online(licenseKey)` | онлайн-активация |
-| `license_export_request(kind, licenseKey, title)` | диалог сохранения и `.hrdreq` (ACTIVATE / REBIND) |
-| `license_import(title)` | диалог открытия, проверка и установка `.hrdlic` или `.hrdclock` |
-| `license_deactivate(online, title)` | онлайн-деактивация или `.hrddeact` + удаление лицензии |
+| `license_export_request(kind, licenseKey, title)` | диалог сохранения и `.kdrreq` (ACTIVATE / REBIND) |
+| `license_import(title)` | диалог открытия, проверка и установка `.kdrlic` или `.kdrclock` |
+| `license_deactivate(online, title)` | онлайн-деактивация или `.kdrdeact` + удаление лицензии |
 | `db_select`, `db_execute`, `db_transaction`, `db_serialize` | доступ к базе через охрану |
 
 Ни одна команда не принимает от окна ни состояния, ни режима, ни пути к файлу:
@@ -422,7 +422,7 @@ now < high_water − 48 ч   ИЛИ   now < issued_at − 48 ч   →   CLOCK_RO
 Адрес сервера вшивается при сборке из `LICENSE_SERVER_URL`; файл лицензии может
 его переопределить подписанным полем `server_url`. Отладочная сборка по
 умолчанию ходит на `http://127.0.0.1:8787/v1`, переменная
-`HRD_LICENSE_SERVER_URL` подменяет адрес только в ней. Фоновая онлайн-проверка
+`KDR_LICENSE_SERVER_URL` подменяет адрес только в ней. Фоновая онлайн-проверка
 — при запуске, если прошёл `refresh_after`, и далее раз в 12 часов. Ошибка
 сети, таймаут, 5xx и неподписанный ответ ничего не меняют.
 
@@ -471,14 +471,14 @@ now < high_water − 48 ч   ИЛИ   now < issued_at − 48 ч   →   CLOCK_RO
 
 ### 9.4. Отличия от GAS
 
-| В GAS | В HRDesk | Почему |
+| В GAS | В KADRA | Почему |
 | --- | --- | --- |
 | пути к файлам приходят из JS, диалоги — `@tauri-apps/plugin-dialog` в окне | диалоги показывает оболочка, команды путей не принимают | изменённый скрипт не может писать файлы куда угодно; офлайн-деактивация не отделяется от сохранения подтверждения |
-| якорь времени передаёт JS (`license_report_time_anchor`), фильтр по `device_id` | якорь читает Rust из базы; фильтра нет | синхронизации между компьютерами в HRDesk нет; окно не может придержать якорь |
+| якорь времени передаёт JS (`license_report_time_anchor`), фильтр по `device_id` | якорь читает Rust из базы; фильтра нет | синхронизации между компьютерами в KADRA нет; окно не может придержать якорь |
 | «пустая база» — нет проводок и счетов | «пустая база» — нет владельца | без владельца в режиме «только чтение» не войти |
-| схема — `schema.sql` | схема — TypeScript, Rust читает собранный `schema.json` | в HRDesk схема генерируется из описания сущностей |
-| доказательство для сервера синхронизации (`license_sync_proof`) | нет | в HRDesk нет синхронизации |
-| `GAS-…`, `.gas*`, `HKCU\Software\GAS` | `HRD-…`, `.hrd*`, `HKCU\Software\HRDesk`; продукт `HRDESK` | файлы GAS не подходят к HRDesk и наоборот |
+| схема — `schema.sql` | схема — TypeScript, Rust читает собранный `schema.json` | в KADRA схема генерируется из описания сущностей |
+| доказательство для сервера синхронизации (`license_sync_proof`) | нет | в KADRA нет синхронизации |
+| `GAS-…`, `.gas*`, `HKCU\Software\GAS` | `KDR-…`, `.kdr*`, `HKCU\Software\KADRA`; продукт `KADRA` | файлы GAS не подходят к KADRA и наоборот |
 
 ## 10. Сервер и License Manager
 
@@ -498,7 +498,7 @@ now < high_water − 48 ч   ИЛИ   now < issued_at − 48 ч   →   CLOCK_RO
 | `admins`, `sessions` | вход в панель |
 
 Ключ лицензии хранится **только хэшем**, как пароль. Формат:
-`HRD-XXXXX-XXXXX-XXXXX-XXXXX` — base32 Крокфорда, 19 случайных символов
+`KDR-XXXXX-XXXXX-XXXXX-XXXXX` — base32 Крокфорда, 19 случайных символов
 (95 бит) и контрольный символ Luhn mod 32. Ввод прощает регистр, пробелы и
 путаницу O/0, I/L/1; опечатка отсекается контрольным символом, не расходуя
 попытку.
@@ -517,7 +517,7 @@ SameSite=Strict` плюс обязательный заголовок на из�
 
 ### 10.3. Утилита вместо сервера
 
-`tools/hrd-license` делает то же из консоли тем же кодом и в базе того же
+`tools/kdr-license` делает то же из консоли тем же кодом и в базе того же
 формата. Переезд на сервер — копирование одного файла базы.
 
 ## 13. Приёмочные проверки
@@ -551,13 +551,13 @@ Rust с подменой времени, отпечатка и хранилищ�
 | 21 | запись журнала на 3 года вперёд → якорь отброшен, аномалия | `license/tests.rs` |
 | 22 | более старый якорь ничего не меняет | `license/tests.rs` |
 | 24 | удалены `state.bin` и реестр: офлайн → REBIND_REQUIRED, онлайн без сети → READ_ONLY, с сетью → ACTIVE | `license/tests.rs`, `license/tests/online.rs` |
-| 25 | CLOCK_ROLLBACK + `.hrdclock` → ACTIVE, один раз | `license/tests.rs` |
+| 25 | CLOCK_ROLLBACK + `.kdrclock` → ACTIVE, один раз | `license/tests.rs` |
 | 26 | READ_ONLY на пустом каталоге: база создана, схема и посев применены, SELECT работает, INSERT отклонён | `license/tests.rs`, `db/mod.rs` |
 | 27 | прямой `db_execute` / `db_transaction` в READ_ONLY → отказ | `license/tests.rs` |
 | 28 | `REVOKED` с чужим `nonce` → отклонён | `license/tests.rs`, `license/tests/online.rs` |
 | 29 | бессрочная, два года обычных записей журнала → без аномалий | `license/clock.rs`, `license/tests.rs` |
 
-Тест 23 GAS (веб-драйвер не попадает в десктопную сборку) в HRDesk не нужен:
+Тест 23 GAS (веб-драйвер не попадает в десктопную сборку) в KADRA не нужен:
 веб-режим без `server.ts` не работает, а сервер в установщик не входит (9.3).
 
 Сквозные проверки с настоящей серверной стороной (нужен Node 22.18+):
@@ -567,7 +567,7 @@ cd src-tauri
 cargo test --lib -- --ignored e2e
 ```
 
-`e2e_with_the_licence_server` — клиент пишет запрос, утилита `hrd-license`
+`e2e_with_the_licence_server` — клиент пишет запрос, утилита `kdr-license`
 выпускает файл, клиент его ставит; продление и офлайн-деактивация.
 `e2e_online_over_http` — настоящий клиент против настоящего сервера по HTTP:
 активация, обновление, переустановка и привязка, деактивация, отзыв.

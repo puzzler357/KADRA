@@ -208,7 +208,7 @@ export function inTransaction<T>(db: Db, work: () => T): T {
   }
 }
 
-/** The next value of a named sequence, for readable ids like HRD-2026-000017. */
+/** The next value of a named sequence, for readable ids like KDR-2026-000017. */
 export function nextValue(db: Db, name: string): number {
   db.prepare('INSERT INTO counters (name, value) VALUES (?, 1) ON CONFLICT (name) DO UPDATE SET value = value + 1')
     .run(name);

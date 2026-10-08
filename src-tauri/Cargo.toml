@@ -1,12 +1,12 @@
 [package]
-name = "hrdesk"
+name = "kadra"
 version = "0.1.0"
-description = "HRDesk — локальное однопользовательское кадровое приложение"
-authors = ["HRDesk"]
+description = "KADRA — локальное однопользовательское кадровое приложение"
+authors = ["KADRA"]
 edition = "2021"
 
 [lib]
-name = "hrdesk_lib"
+name = "kadra_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

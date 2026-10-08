@@ -117,7 +117,7 @@ export function ActivationPanel({ status }: { status: LicenseStatus }) {
             id="license-key"
             value={licenseKey}
             onChange={(e) => setLicenseKey(e.target.value)}
-            placeholder="HRD-XXXXX-XXXXX-XXXXX-XXXXX"
+            placeholder="KDR-XXXXX-XXXXX-XXXXX-XXXXX"
             spellCheck={false}
             autoComplete="off"
             className="flex-1 min-w-0 bg-input border border-line rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-accent-500"

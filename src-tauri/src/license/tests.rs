@@ -47,7 +47,7 @@ impl Terms {
     fn annual(issued_at: DateTime<Utc>) -> Self {
         let paid = issued_at + Duration::days(365);
         Self {
-            license_id: "HRD-2026-000001",
+            license_id: "KDR-2026-000001",
             activation_id: "ACT-00000001",
             revision: 1,
             plan: "ANNUAL",
@@ -88,7 +88,7 @@ impl Vendor {
             "revision": terms.revision,
             "customer_id": "CUST-1",
             "customer_name": "ABC Ltd.",
-            "product": "HRDESK",
+            "product": "KADRA",
             "edition": "PRO",
             "features": [],
             "plan": terms.plan,
@@ -116,7 +116,7 @@ impl Vendor {
     }
 }
 
-/// One computer with HRDesk: its machine, licence manager and database.
+/// One computer with KADRA: its machine, licence manager and database.
 struct Client {
     machine: Arc<FakeMachine>,
     manager: LicenseManager,
@@ -155,9 +155,9 @@ impl Client {
     }
 
     fn request(&self, kind: RequestType) -> RequestPayload {
-        let path = self.dir.join("request.hrdreq");
+        let path = self.dir.join("request.kdrreq");
         let key =
-            (kind == RequestType::Activate).then(|| "HRD-AAAAA-BBBBB-CCCCC-DDDDD".to_string());
+            (kind == RequestType::Activate).then(|| "KDR-AAAAA-BBBBB-CCCCC-DDDDD".to_string());
         self.manager.export_request(kind, key, &path).unwrap();
         let signed: SignedRequest = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         verify_request(&signed).expect("the request carries a valid device signature")
@@ -228,7 +228,7 @@ fn offline_activation_by_file_exchange() {
     assert_eq!(request.kind, RequestType::Activate);
     assert_eq!(
         request.license_key.as_deref(),
-        Some("HRD-AAAAA-BBBBB-CCCCC-DDDDD")
+        Some("KDR-AAAAA-BBBBB-CCCCC-DDDDD")
     );
     assert_eq!(w.client.status(), Status::Active);
     assert!(w.client.can_write());
@@ -554,7 +554,7 @@ fn t24_online_licence_without_its_state_is_read_only() {
     let request = w.client.activate(&w.vendor, &terms);
 
     let other = Terms {
-        license_id: "HRD-2026-000777",
+        license_id: "KDR-2026-000777",
         mode: "ONLINE",
         ..terms.clone()
     };
@@ -567,7 +567,7 @@ fn t24_online_licence_without_its_state_is_read_only() {
     assert!(!w.client.can_write());
 
     let offline = Terms {
-        license_id: "HRD-2026-000778",
+        license_id: "KDR-2026-000778",
         ..terms
     };
     std::fs::write(
@@ -578,7 +578,7 @@ fn t24_online_licence_without_its_state_is_read_only() {
     assert_eq!(w.client.status(), Status::RebindRequired);
 }
 
-// Test 25: rollback lifted by the vendor's signed .hrdclock, once.
+// Test 25: rollback lifted by the vendor's signed .kdrclock, once.
 #[test]
 fn t25_clock_reset_file_lifts_the_rollback() {
     let now = at(START);
@@ -668,7 +668,7 @@ fn offline_deactivation_writes_a_proof_and_removes_the_licence() {
     let terms = Terms::annual(at(START));
     let request = w.client.activate(&w.vendor, &terms);
 
-    let path = w.client.dir.join("proof.hrddeact");
+    let path = w.client.dir.join("proof.kdrdeact");
     let view = w.client.manager.deactivate(&path).unwrap();
     assert_eq!(view.state, Status::Unlicensed);
     assert!(!view.has_device_key);
@@ -750,7 +750,7 @@ fn e2e_with_the_licence_server() {
     let cli = |args: &[&str]| -> String {
         let output = Command::new("node")
             .current_dir(&repo)
-            .arg("tools/hrd-license/cli.js")
+            .arg("tools/kdr-license/cli.js")
             .args(args)
             .args(["--dev", "--db", db.to_str().unwrap()])
             .output()
@@ -806,7 +806,7 @@ fn e2e_with_the_licence_server() {
     let key = after(&created, "показывается один раз): ");
     let license_id = after(&created, "Лицензия ");
 
-    let request = dir.join("request.hrdreq");
+    let request = dir.join("request.kdrreq");
     manager
         .export_request(RequestType::Activate, Some(key), &request)
         .unwrap();
@@ -818,7 +818,7 @@ fn e2e_with_the_licence_server() {
         "--out",
         issued.to_str().unwrap(),
     ]);
-    let view = manager.import(&only_file(&issued, "hrdlic")).unwrap();
+    let view = manager.import(&only_file(&issued, "kdrlic")).unwrap();
     assert_eq!(view.state, Status::Active);
     assert_eq!(view.license.as_ref().unwrap().license_id, license_id);
     let paid = view.license.unwrap().paid_until.unwrap();
@@ -832,12 +832,12 @@ fn e2e_with_the_licence_server() {
         "--out",
         renewed.to_str().unwrap(),
     ]);
-    let view = manager.import(&only_file(&renewed, "hrdlic")).unwrap();
+    let view = manager.import(&only_file(&renewed, "kdrlic")).unwrap();
     assert_eq!(view.state, Status::Active);
     assert!(view.license.unwrap().paid_until.unwrap() > paid);
 
     // 7.2 offline: the proof frees the seat on the seller's side.
-    let proof = dir.join("proof.hrddeact");
+    let proof = dir.join("proof.kdrdeact");
     assert_eq!(
         manager.deactivate(&proof).unwrap().state,
         Status::Unlicensed

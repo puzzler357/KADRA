@@ -74,17 +74,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       >
         <div className="h-20 flex items-center justify-between px-6">
           {sidebarOpen && (
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-accent-500 text-white font-bold flex items-center justify-center rounded-lg text-sm">
-                HR
-              </div>
-              <span className="font-semibold text-xl text-primary">HRDesk</span>
+            <div className="flex items-center">
+              <img src="/brand/kadra-logo.png" alt="KADRA — учёт кадров" className="h-14 w-auto dark:hidden" />
+              <img src="/brand/kadra-logo-light.png" alt="KADRA — учёт кадров" className="h-14 w-auto hidden dark:block" />
             </div>
           )}
           {!sidebarOpen && (
-            <div className="w-8 h-8 bg-accent-500 text-white font-bold flex items-center justify-center rounded-lg text-sm mx-auto">
-              HR
-            </div>
+            <img src="/brand/kadra-icon-192.png" alt="KADRA" className="w-9 h-9 rounded-lg mx-auto" />
           )}
         </div>
         
@@ -107,12 +103,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
         <div className="p-4 mt-auto">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-accent-900 flex items-center justify-center text-accent-300 font-semibold flex-shrink-0">
-              {user?.name?.[0] || 'A'}
-            </div>
+            <img src="/brand/kadra-avatar.png" alt="" className="w-10 h-10 rounded-full flex-shrink-0" />
             {sidebarOpen && (
               <div className="overflow-hidden">
-                <p className="font-medium text-sm text-primary truncate">{user?.name || 'HRDesk'}</p>
+                <p className="font-medium text-sm text-primary truncate">{user?.name || 'KADRA'}</p>
                 <p className="text-xs text-muted truncate">{t('user.owner')}</p>
               </div>
             )}

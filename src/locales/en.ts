@@ -1,10 +1,10 @@
 export const en = {
   translation: {
-    app_name: "HRDesk",
+    app_name: "KADRA",
     license: {
       title: "License",
       subtitle: "This computer's license state, exchange files with the seller, and deactivation.",
-      webOnly: "Licensing applies to the desktop version of HRDesk only. The browser development mode is not checked.",
+      webOnly: "Licensing applies to the desktop version of KADRA only. The browser development mode is not checked.",
       loading: "Loading license information…",
       never: "—",
       perpetual: "perpetual",
@@ -19,9 +19,9 @@ export const en = {
         computer: "Computer",
         paidUntil: "Paid until",
         leaseUntil: "File valid until",
-        maxVersion: "HRDesk versions up to",
+        maxVersion: "KADRA versions up to",
         lastCheck: "Last check",
-        appVersion: "HRDesk version"
+        appVersion: "KADRA version"
       },
       plan: {
         PERPETUAL: "Perpetual",
@@ -36,12 +36,12 @@ export const en = {
       state: {
         ACTIVE: "The license is active.",
         GRACE: "The subscription has ended; grace days are running.",
-        UNLICENSED: "HRDesk is not activated.",
+        UNLICENSED: "KADRA is not activated.",
         INVALID: "The license file is damaged or signed with an unknown key.",
         MACHINE_MISMATCH: "The license was issued for another computer.",
         REBIND_REQUIRED: "The license must be bound to this computer again: create a request file and send it to the seller.",
         STATE_MISSING: "The license state could not be read.",
-        VERSION_NOT_COVERED: "This version of HRDesk is not covered by the license.",
+        VERSION_NOT_COVERED: "This version of KADRA is not covered by the license.",
         CLOCK_ROLLBACK: "The computer clock is behind the last known time. Correct the date and time.",
         REVOKED: "The license has been revoked.",
         EXPIRED: "The subscription has ended. Renew it to continue working.",
@@ -67,29 +67,29 @@ export const en = {
         close: "Close"
       },
       activate: {
-        title: "Activate HRDesk",
+        title: "Activate KADRA",
         subtitle: "Enter the license key you received from the seller. Without internet you can activate by exchanging files.",
         key: "License key",
         offlineTitle: "Without internet — by file exchange",
         step1: "1. Save a request file (the key is entered above).",
         step2: "2. Send the request file to the seller and receive a license file.",
-        step3: "3. Import the license file you received (.hrdlic)."
+        step3: "3. Import the license file you received (.kdrlic)."
       },
       deactivate: {
         title: "Deactivate this computer?",
-        desc: "HRDesk will save a confirmation file (.hrddeact) and remove the license from this computer. Send the file to the seller to free the seat for another computer. Data stays available for viewing.",
-        descOnline: "The server will free this computer's seat and the license will be removed from it. Without internet you can create a confirmation file (.hrddeact) and send it to the seller. Data stays available for viewing."
+        desc: "KADRA will save a confirmation file (.kdrdeact) and remove the license from this computer. Send the file to the seller to free the seat for another computer. Data stays available for viewing.",
+        descOnline: "The server will free this computer's seat and the license will be removed from it. Without internet you can create a confirmation file (.kdrdeact) and send it to the seller. Data stays available for viewing."
       },
       dialog: {
         saveRequest: "Save request file",
         saveProof: "Save deactivation confirmation file",
-        openLicense: "Choose a license file (.hrdlic) or an unlock file (.hrdclock)"
+        openLicense: "Choose a license file (.kdrlic) or an unlock file (.kdrclock)"
       },
       msg: {
         imported: "License file installed",
         requestSaved: "Request file saved",
         checked: "License checked",
-        activated: "HRDesk activated",
+        activated: "KADRA activated",
         deactivated: "Computer deactivated, confirmation file saved",
         deactivatedOnline: "Computer deactivated, seat freed"
       }

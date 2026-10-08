@@ -1,5 +1,5 @@
 /**
- * The online endpoints the HRDesk client calls (5.2): /v1/activate and
+ * The online endpoints the KADRA client calls (5.2): /v1/activate and
  * /v1/refresh, authenticated by the device signature alone.
  */
 

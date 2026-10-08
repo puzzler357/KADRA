@@ -17,7 +17,7 @@ import { createWebhookSource } from './payments.ts';
 import { LicenseService } from './service.ts';
 
 const [command, username] = process.argv.slice(2);
-const db = openDb(process.env.HRD_LICENSE_DB ?? 'data/license.db');
+const db = openDb(process.env.KDR_LICENSE_DB ?? 'data/license.db');
 
 /**
  * Reads a password without echoing it: the prompt is written to the terminal,

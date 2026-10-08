@@ -26,7 +26,7 @@ export function setup(start = '2026-09-27T16:00:00Z') {
 
 let machines = 0;
 
-/** A computer running HRDesk: its fingerprint and device key, signing requests as the client does. */
+/** A computer running KADRA: its fingerprint and device key, signing requests as the client does. */
 export class Device {
   fp: Fingerprint;
   key = crypto.generateKeyPairSync('ed25519');

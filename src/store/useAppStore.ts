@@ -103,7 +103,7 @@ const SETTINGS_DEFAULTS = {
   currencyDecimals: DEFAULT_CURRENCY.currencyDecimals,
   thousandsSeparator: DEFAULT_CURRENCY.thousandsSeparator,
   docxTemplatePath: '/templates/blank.docx',
-  orgName: 'HRDesk',
+  orgName: 'KADRA',
   orgInn: '',
   orgDirector: '',
   dateFormat: 'dd.MM.yyyy' as DateFormat,
@@ -136,7 +136,7 @@ export const useAppStore = create<AppState>()(
       docxTemplatePath: '/templates/blank.docx',
       setDocxTemplatePath: (docxTemplatePath) => set({ docxTemplatePath }),
 
-      orgName: 'HRDesk',
+      orgName: 'KADRA',
       orgInn: '',
       orgDirector: '',
       dateFormat: 'dd.MM.yyyy',

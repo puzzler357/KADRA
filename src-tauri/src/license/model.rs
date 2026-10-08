@@ -2,7 +2,7 @@
 //! disk between runs.
 //!
 //! Unknown fields are ignored on purpose: a newer License Manager may add
-//! fields that an older HRDesk does not know, and the signature already
+//! fields that an older KADRA does not know, and the signature already
 //! guarantees nobody else added them.
 
 use chrono::{DateTime, Utc};
@@ -141,7 +141,7 @@ pub enum RequestType {
 }
 
 /// What the device asks for (5.1). The same JSON goes over HTTPS or into a
-/// `.hrdreq` file; a `.hrddeact` proof is a DEACTIVATE request.
+/// `.kdrreq` file; a `.kdrdeact` proof is a DEACTIVATE request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequestPayload {
     #[serde(rename = "type")]

@@ -33,7 +33,7 @@ async function signIn(ctx: Started, step: number) {
 }
 
 function client(ctx: Started, cookie: string) {
-  return async (method: string, url: string, body?: unknown, extra: Record<string, string> = { 'X-HRD-LM': '1' }) => {
+  return async (method: string, url: string, body?: unknown, extra: Record<string, string> = { 'X-KDR-LM': '1' }) => {
     const res = await fetch(`${ctx.base}${url}`, {
       method,
       headers: { cookie, 'content-type': 'application/json', ...extra },
@@ -101,7 +101,7 @@ describe('License Manager API', () => {
       { customer_id: customer.id, plan: 'ANNUAL', activation_mode: 'OFFLINE', seats: 3 });
     assert.equal(created.status, 200);
     const key = created.body.license_key;
-    assert.match(key, /^HRD-/);
+    assert.match(key, /^KDR-/);
 
     const details = await api('GET', `/admin/api/licenses/${created.body.license.id}`);
     assert.equal(JSON.stringify(details.body).includes(key), false, 'the key is shown once, never stored');

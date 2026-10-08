@@ -62,7 +62,7 @@ export function totpAt(secret: string, step: number): string {
 export const currentStep = (now: Date) => Math.floor(now.getTime() / 1000 / TOTP_STEP);
 
 export function otpauthUri(username: string, secret: string): string {
-  return `otpauth://totp/HRDesk%20License%20Manager:${encodeURIComponent(username)}?secret=${secret}&issuer=HRDesk%20License%20Manager`;
+  return `otpauth://totp/KADRA%20License%20Manager:${encodeURIComponent(username)}?secret=${secret}&issuer=KADRA%20License%20Manager`;
 }
 
 /**
@@ -140,5 +140,5 @@ export function logout(db: Db, token: string | undefined): void {
   if (token) db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(token));
 }
 
-export const SESSION_COOKIE = 'hrd_lm';
+export const SESSION_COOKIE = 'kdr_lm';
 export const SESSION_MAX_AGE_MS = SESSION_HOURS * 3_600_000;

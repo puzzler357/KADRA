@@ -1,5 +1,5 @@
-//! The file exchange (5.1, 5.3, 7.2): `.hrdreq` out, `.hrdlic` and `.hrdclock`
-//! in, `.hrddeact` out. The same checks apply whether a licence came from the
+//! The file exchange (5.1, 5.3, 7.2): `.kdrreq` out, `.kdrlic` and `.kdrclock`
+//! in, `.kdrdeact` out. The same checks apply whether a licence came from the
 //! network or from a USB stick - there is one install path.
 
 use std::fs;
@@ -81,7 +81,7 @@ impl LicenseManager {
         license_key: Option<String>,
         path: &Path,
     ) -> OpResult<StatusView> {
-        require_extension(path, "hrdreq")?;
+        require_extension(path, "kdrreq")?;
         let _op = lock(&self.op);
         let now = self.platform.now();
 
@@ -120,7 +120,7 @@ impl LicenseManager {
         Ok(self.refresh_locked())
     }
 
-    /// Checks and installs a `.hrdlic` or `.hrdclock`.
+    /// Checks and installs a `.kdrlic` or `.kdrclock`.
     pub fn import(&self, path: &Path) -> OpResult<StatusView> {
         let bytes = fs::read(path).map_err(|e| format!("Не удалось прочитать файл: {e}"))?;
         self.import_bytes(&bytes)
@@ -310,7 +310,7 @@ impl LicenseManager {
     /// licence and the key are removed. The proof is a DEACTIVATE request, so
     /// the server reads it with the same code as every other request.
     pub fn deactivate(&self, path: &Path) -> OpResult<StatusView> {
-        require_extension(path, "hrddeact")?;
+        require_extension(path, "kdrdeact")?;
         let _op = lock(&self.op);
         let now = self.platform.now();
         let license = self

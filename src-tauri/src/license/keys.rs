@@ -1,10 +1,10 @@
-//! Public keys HRDesk trusts, by `kid` (3.3).
+//! Public keys KADRA trusts, by `kid` (3.3).
 //!
 //! The list is compiled in from `license-keys.json` next to Cargo.toml.
 //! Rotating a key means adding the new `kid` there in version N and signing
 //! with it from version N+1; revoking one means shipping a build without it.
 //!
-//! The `dev` key, whose private half is committed under tools/hrd-license/dev,
+//! The `dev` key, whose private half is committed under tools/kdr-license/dev,
 //! is added only to debug builds. A release build does not contain it at all,
 //! so a licence signed with it is INVALID there (test 2).
 

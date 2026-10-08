@@ -1,27 +1,27 @@
 #!/usr/bin/env node
 /**
- * hrd-license: the licence server's operations from the console, on the
+ * kdr-license: the licence server's operations from the console, on the
  * seller's own computer (LICENSING.md 10.3). Same code as the server
  * (license-server/src/service.ts) and the same database format, so moving to
  * the server later means copying one file.
  *
- *   keygen   --kid hrd-2026-1
+ *   keygen   --kid kdr-2026-1
  *   customer --name "ABC Ltd." [--email ..] [--phone ..] [--contact ..]
  *   license  --customer CUST-000001 --plan ANNUAL [--mode OFFLINE] [--seats 1] [--start 2026-10-01] [--max-version 1.99.99]
- *   issue    --request client.hrdreq [--approve-transfer] [--transfer-from ACT-..] [--override-limit] [--out dir]
- *   release  --proof old-pc.hrddeact
- *   renew    --license-id HRD-2026-000001 [--paid-on 2027-09-20] [--periods 1]
+ *   issue    --request client.kdrreq [--approve-transfer] [--transfer-from ACT-..] [--override-limit] [--out dir]
+ *   release  --proof old-pc.kdrdeact
+ *   renew    --license-id KDR-2026-000001 [--paid-on 2027-09-20] [--periods 1]
  *            [--source cash|bank_transfer|card|other] [--amount 1200 --currency TMT] [--receipt №] [--out dir]
- *   revoke   --license-id HRD-2026-000001 --reason "..."
+ *   revoke   --license-id KDR-2026-000001 --reason "..."
  *   reissue  --activation ACT-.. [--out dir]
  *   clock-reset --activation ACT-.. [--high-water-to 2026-10-01] [--out dir]
- *   inspect  file.hrdlic|.hrdclock|.hrdreq|.hrddeact
+ *   inspect  file.kdrlic|.kdrclock|.kdrreq|.kdrdeact
  *   list
  *
- * Signing: --kid K [--key path] with the passphrase in HRD_LICENSE_PASSPHRASE
+ * Signing: --kid K [--key path] with the passphrase in KDR_LICENSE_PASSPHRASE
  * or asked for; or --dev for the development key, which only debug builds of
- * HRDesk accept. Database: --db path, default ~/.hrd-license/license.db (with
- * --dev: tools/hrd-license/dev/license.db).
+ * KADRA accept. Database: --db path, default ~/.kdr-license/license.db (with
+ * --dev: tools/kdr-license/dev/license.db).
  */
 
 import crypto from 'node:crypto';
@@ -37,7 +37,7 @@ import { openEnvelope, rawPublicKey } from '../../license-server/src/core/envelo
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..', '..');
-const HOME = path.join(os.homedir(), '.hrd-license');
+const HOME = path.join(os.homedir(), '.kdr-license');
 const DEV_KEY = path.join(HERE, 'dev', 'dev.key');
 const KEYRING = path.join(REPO, 'src-tauri', 'license-keys.json');
 const DEV_KEYRING = path.join(REPO, 'src-tauri', 'license-keys.dev.json');
@@ -67,7 +67,7 @@ function need(options, name) {
 const readJson = file => JSON.parse(fs.readFileSync(file, 'utf8'));
 
 async function passphrase() {
-  if (process.env.HRD_LICENSE_PASSPHRASE) return process.env.HRD_LICENSE_PASSPHRASE;
+  if (process.env.KDR_LICENSE_PASSPHRASE) return process.env.KDR_LICENSE_PASSPHRASE;
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const answer = await rl.question('Пароль ключа подписи: ');
   rl.close();
@@ -233,7 +233,7 @@ const { command, options } = parseArgs(process.argv.slice(2));
 const run = commands[command];
 if (!run) {
   console.log('Команды: keygen, customer, license, issue, release, renew, revoke, reissue, clock-reset, inspect, list.');
-  console.log('Подробности — в начале tools/hrd-license/cli.js.');
+  console.log('Подробности — в начале tools/kdr-license/cli.js.');
   process.exit(command ? 1 : 0);
 }
 try {

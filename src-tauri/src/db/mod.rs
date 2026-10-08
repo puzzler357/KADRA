@@ -159,7 +159,7 @@ impl Database {
 
     /// The newest audit-log timestamp: the clock anchor of the licence check
     /// (TZ.md 13.6). Read here rather than taken from the webview, so a
-    /// modified script cannot hold it back. HRDesk has no sync between
+    /// modified script cannot hold it back. KADRA has no sync between
     /// computers, so every row in the journal was written on this one.
     pub fn newest_audit_time(&self) -> Option<String> {
         self.lock()
@@ -224,7 +224,7 @@ impl Database {
             .map(|elapsed| elapsed.as_nanos())
             .unwrap_or_default();
         let target = std::env::temp_dir().join(format!(
-            "hrdesk-export-{}-{stamp}-{}.db",
+            "kadra-export-{}-{stamp}-{}.db",
             std::process::id(),
             COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
@@ -392,12 +392,12 @@ mod tests {
 
     // A database the old tauri-plugin-sql build wrote, copied together with
     // its -wal file:
-    //   HRD_REAL_DB=%APPDATA%\com.hrdesk.local\local-hr-docs.db cargo test -- --ignored
+    //   KDR_REAL_DB=%APPDATA%\com.kadra.local\local-hr-docs.db cargo test -- --ignored
     // The original is never opened.
     #[test]
     #[ignore]
     fn opens_a_copy_of_a_real_database_without_losing_rows() {
-        let source = PathBuf::from(std::env::var("HRD_REAL_DB").expect("set HRD_REAL_DB"));
+        let source = PathBuf::from(std::env::var("KDR_REAL_DB").expect("set KDR_REAL_DB"));
         let dir = tempfile::tempdir().unwrap();
         let copy = dir.path().join(DATABASE_FILE);
         fs::copy(&source, &copy).unwrap();

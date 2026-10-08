@@ -95,7 +95,7 @@ function toast(message, kind = 'ok') {
 async function api(method, url, body) {
   const res = await fetch(url, {
     method,
-    headers: { 'content-type': 'application/json', 'X-HRD-LM': '1' },
+    headers: { 'content-type': 'application/json', 'X-KDR-LM': '1' },
     body: body === undefined ? undefined : JSON.stringify(body),
     credentials: 'same-origin'
   });
@@ -218,7 +218,7 @@ function loginView() {
       }
     }
   },
-  h('h1', {}, 'HRDesk License Manager'),
+  h('h1', {}, 'KADRA License Manager'),
   h('label', {}, 'Имя администратора', username),
   h('label', {}, 'Пароль', password.field),
   h('label', {}, 'Одноразовый код', code,
@@ -280,7 +280,7 @@ async function licensesView() {
       { name: 'activation_mode', label: 'Режим', options: [['OFFLINE', 'Офлайн (обмен файлами)'], ['ONLINE', 'Онлайн']] },
       { name: 'seats', label: 'Мест (компьютеров)', type: 'number', value: 1, min: 1 },
       { name: 'start', label: 'Начало оплаченного периода', type: 'date', value: new Date().toISOString().slice(0, 10) },
-      { name: 'max_version', label: 'Версии HRDesk до (пусто — все)', value: '1.99.99' },
+      { name: 'max_version', label: 'Версии KADRA до (пусто — все)', value: '1.99.99' },
       { name: 'edition', label: 'Редакция', value: 'PRO' },
       { name: 'features', label: 'Модули через запятую (необязательно)' },
       { note: 'Месячный тариф продаётся только онлайн (ТЗ 2.1).' }
@@ -364,7 +364,7 @@ async function licenseView() {
     const values = await ask('Разблокировка часов', [
       { note: 'Для офлайн-клиента в состоянии «часы переведены назад» (ТЗ 6.3). Отметка времени клиента будет заменена указанной датой.' },
       { name: 'high_water_to', label: 'Новая отметка времени', type: 'date', value: new Date().toISOString().slice(0, 10) }
-    ], 'Выпустить .hrdclock');
+    ], 'Выпустить .kdrclock');
     if (!values) return;
     const file = await act(() => api('POST', `/admin/api/activations/${activation.id}/clock-reset`,
       { high_water_to: `${values.high_water_to}T00:00:00Z` }), 'Файл разблокировки выпущен');
@@ -396,7 +396,7 @@ async function licenseView() {
         h('dt', {}, 'Тариф'), h('dd', {}, `${PLAN[l.plan]}, ${MODE[l.activation_mode]}, редакция ${l.edition}`),
         h('dt', {}, 'Места'), h('dd', {}, `${d.activations.filter(a => a.status === 'ACTIVE' || a.status === 'FORK_SUSPECTED').length} из ${l.seats}`),
         h('dt', {}, 'Оплачено до'), h('dd', {}, l.paid_until ? `${date(l.paid_until)} + ${l.grace_days} льготных дн.` : 'бессрочно'),
-        h('dt', {}, 'Версии HRDesk'), h('dd', {}, l.max_version ? `до ${l.max_version}` : 'все'),
+        h('dt', {}, 'Версии KADRA'), h('dd', {}, l.max_version ? `до ${l.max_version}` : 'все'),
         h('dt', {}, 'Переносы за год'), h('dd', {}, `${d.transfers_last_year} из ${d.plan.max_transfers_per_year}`),
         h('dt', {}, 'Создана'), h('dd', {}, dateTime(l.created_at)))),
     h('section', { class: 'card' },
@@ -410,7 +410,7 @@ async function licenseView() {
           ? h('div', { class: 'row' },
               a.status === 'FORK_SUSPECTED' && h('button', { onclick: () => clearFork(a) }, 'Снять подозрение'),
               h('button', { onclick: () => issue(a) }, 'Выпустить файл'),
-              h('button', { onclick: () => clockReset(a) }, '.hrdclock'),
+              h('button', { onclick: () => clockReset(a) }, '.kdrclock'),
               h('button', { class: 'danger', onclick: () => release(a) }, 'Освободить'))
           : '' }
       ], d.activations)),
@@ -486,7 +486,7 @@ function offlineView() {
         h('dt', {}, 'Тип'), h('dd', {}, r.type),
         h('dt', {}, 'Компьютер'), h('dd', {}, r.device_name),
         h('dt', {}, 'Ключ устройства'), h('dd', { class: 'mono' }, `${r.device_key}…`),
-        h('dt', {}, 'Версия HRDesk'), h('dd', {}, r.app_version),
+        h('dt', {}, 'Версия KADRA'), h('dd', {}, r.app_version),
         h('dt', {}, 'Время на компьютере'), h('dd', {}, dateTime(r.client_time)),
         r.license_key_hint && [h('dt', {}, 'Ключ лицензии'), h('dd', { class: 'mono' }, r.license_key_hint)],
         d.license && [h('dt', {}, 'Лицензия'), h('dd', {}, `${d.license.id} — ${d.license.customer_name}, ${PLAN[d.license.plan]}, ${MODE[d.license.activation_mode]}`)],
@@ -515,14 +515,14 @@ function offlineView() {
           d.action === 'DEACTIVATE' ? 'Освободить место' : 'Выпустить файл лицензии'))));
   }
 
-  const input = h('input', { type: 'file', accept: '.hrdreq,.hrddeact,application/json',
+  const input = h('input', { type: 'file', accept: '.kdrreq,.kdrdeact,application/json',
     onchange: async event => {
       const file = event.target.files[0];
       if (!file) return;
       try {
         request = JSON.parse(await file.text());
       } catch {
-        toast('Это не файл запроса HRDesk', 'error');
+        toast('Это не файл запроса KADRA', 'error');
         return;
       }
       Object.assign(options, { transfer_from: '', approve_transfer: false, override_transfer_limit: false });
@@ -533,7 +533,7 @@ function offlineView() {
   return [
     h('section', { class: 'card' },
       h('h2', {}, 'Офлайн-файлы'),
-      h('p', { class: 'muted' }, 'Загрузите файл запроса (.hrdreq) или подтверждение деактивации (.hrddeact), полученный от клиента. Сначала будет показано, что он просит; ничего не меняется до подтверждения.'),
+      h('p', { class: 'muted' }, 'Загрузите файл запроса (.kdrreq) или подтверждение деактивации (.kdrdeact), полученный от клиента. Сначала будет показано, что он просит; ничего не меняется до подтверждения.'),
       input),
     output
   ];
@@ -686,7 +686,7 @@ async function render() {
   const current = state.view === 'license' ? 'licenses' : state.view;
   root.replaceChildren(
     h('header', {},
-      h('h1', {}, 'HRDesk License Manager'),
+      h('h1', {}, 'KADRA License Manager'),
       h('nav', {}, Object.entries(VIEWS).filter(([, [title]]) => title).map(([key, [title]]) =>
         h('button', { class: key === current ? 'active' : undefined, onclick: () => go(key) }, title))),
       h('span', { class: 'muted' }, state.user),

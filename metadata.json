@@ -1,6 +1,6 @@
 {
-  "name": "",
-  "description": "",
+  "name": "KADRA",
+  "description": "KADRA — учёт кадров: локальная HR-система",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

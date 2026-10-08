@@ -34,7 +34,7 @@ const DEBUG_SERVER: &str = "http://127.0.0.1:8787/v1";
 pub fn server_url(license: Option<&LicensePayload>) -> Option<String> {
     // Debug builds only: point at a test server without rebuilding.
     #[cfg(debug_assertions)]
-    if let Ok(url) = std::env::var("HRD_LICENSE_SERVER_URL") {
+    if let Ok(url) = std::env::var("KDR_LICENSE_SERVER_URL") {
         return Some(url.trim_end_matches('/').to_string());
     }
     let url = license
@@ -68,7 +68,7 @@ impl HttpTransport {
         let client = reqwest::blocking::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(20))
-            .user_agent(format!("HRDesk/{app_version}"))
+            .user_agent(format!("KADRA/{app_version}"))
             .build()
             .map_err(|e| e.to_string())?;
         Ok(Self { client })
