@@ -1,8 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Mail, Briefcase, Key, Calendar as CalendarIcon, CheckSquare, History, User } from 'lucide-react';
 import EmployeeForm from '../components/EmployeeForm';
+import { useNotify } from '../components/Toasts';
+import * as api from '../data';
 import { useMoney } from '../lib/money';
 import { useAppStore } from '../store/useAppStore';
 import { useDatabaseStore } from '../store/useDatabaseStore';
@@ -20,11 +22,46 @@ export default function Profile() {
   const navigate = useNavigate();
   const money = useMoney();
 
-  const { user, theme, setTheme, language, setLanguage, orgName } = useAppStore();
+  const { user, theme, setTheme, language, setLanguage, orgName, login } = useAppStore();
+  const notify = useNotify();
   const { employees, timeOffRequests, checklistTasks, movements, updateEmployee } = useDatabaseStore();
 
   const [activeTab, setActiveTab] = useState('overview');
   const [isEditOpen, setIsEditOpen] = useState(false);
+
+  // Учётной записи может не быть вовсе: приложение открывается и без неё.
+  // Здесь её заводят и правят — больше нигде этого сделать нельзя.
+  const [accountName, setAccountName] = useState(user?.name ?? '');
+  const [accountEmail, setAccountEmail] = useState(user?.email ?? '');
+  const [accountBusy, setAccountBusy] = useState(false);
+
+  // Владелец приезжает асинхронно: на первом рендере он ещё пуст, и поля
+  // надо заполнить, когда он появится.
+  useEffect(() => {
+    setAccountName(user?.name ?? '');
+    setAccountEmail(user?.email ?? '');
+  }, [user?.name, user?.email]);
+
+  const saveAccount = async () => {
+    const name = accountName.trim();
+    const email = accountEmail.trim();
+    if (!name && !email) {
+      notify.error(t('profile.account.needName'));
+      return;
+    }
+
+    setAccountBusy(true);
+    try {
+      const data = await api.saveOwner(name, email);
+      const created = !user;
+      login(data.user, data.token);
+      notify.success(created ? t('profile.account.created') : t('profile.account.saved'));
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : t('profile.account.error'));
+    } finally {
+      setAccountBusy(false);
+    }
+  };
 
   // Учётная запись владельца и карточка сотрудника — разные сущности.
   // Связываем их по имени: другого общего ключа в схеме нет.
@@ -87,13 +124,13 @@ export default function Profile() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
             <div className="space-y-6">
               <div>
-                <h3 className="text-xl font-semibold text-primary">{user?.name}</h3>
+                <h3 className="text-xl font-semibold text-primary">{user?.name || t('user.owner')}</h3>
                 <p className="text-muted">{card ? card.position : t('user.owner')}</p>
               </div>
               <div className="space-y-4">
                 <div className="flex items-center gap-3 text-sm">
                   <Mail className="w-5 h-5 text-muted" />
-                  <span className="font-medium text-primary">{user?.email}</span>
+                  <span className="font-medium text-primary">{user?.email || '—'}</span>
                 </div>
                 <div className="flex items-center gap-3 text-sm">
                   <Briefcase className="w-5 h-5 text-muted" />
@@ -116,7 +153,51 @@ export default function Profile() {
             </div>
 
             <div className="space-y-6 border-t md:border-t-0 md:border-l border-line pt-6 md:pt-0 md:pl-8">
-              <h3 className="font-semibold flex items-center gap-2 text-primary">
+              <div className="space-y-3">
+                <h3 className="font-semibold flex items-center gap-2 text-primary">
+                  <User className="w-4 h-4 text-accent-500" />
+                  {t('profile.account.title')}
+                </h3>
+                <p className="text-xs text-muted">
+                  {user ? t('profile.account.hintSome') : t('profile.account.hintNone')}
+                </p>
+
+                <div>
+                  <label htmlFor="owner-name" className="block text-xs text-muted mb-2">
+                    {t('profile.account.name')}
+                  </label>
+                  <input
+                    id="owner-name"
+                    type="text"
+                    value={accountName}
+                    onChange={(e) => setAccountName(e.target.value)}
+                    className="w-full bg-app border border-line rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 text-primary"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="owner-email" className="block text-xs text-muted mb-2">
+                    {t('profile.account.email')}
+                  </label>
+                  <input
+                    id="owner-email"
+                    type="email"
+                    value={accountEmail}
+                    onChange={(e) => setAccountEmail(e.target.value)}
+                    className="w-full bg-app border border-line rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 text-primary"
+                  />
+                </div>
+
+                <button
+                  onClick={saveAccount}
+                  disabled={accountBusy}
+                  className="bg-accent-500 hover:bg-accent-600 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors"
+                >
+                  {user ? t('profile.account.save') : t('profile.account.create')}
+                </button>
+              </div>
+
+              <h3 className="font-semibold flex items-center gap-2 text-primary pt-4 border-t border-line">
                 <Key className="w-4 h-4 text-accent-500" />
                 {t('profile.security')}
               </h3>

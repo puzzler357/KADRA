@@ -191,7 +191,7 @@ export const restoreBackup = (payload: unknown): Promise<{ restored: number; tab
   isTauri ? tauri.restoreBackup(payload)
     : fetch('/api/backup/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).then(jsonOrThrow);
 
-export const authStatus = (): Promise<{ needsSetup: boolean; hasPassword: boolean }> =>
+export const authStatus = (): Promise<{ hasOwner: boolean; hasPassword: boolean }> =>
   isTauri ? tauri.authStatus() : fetch('/api/auth/status').then(jsonOrThrow);
 
 /** Владелец без ввода пароля. null — владельца ещё нет. */
@@ -199,10 +199,10 @@ export const currentOwner = (): Promise<LoginResult | null> =>
   isTauri ? tauri.currentOwner()
     : fetch('/api/auth/owner').then(jsonOrThrow).then((d) => (d.user ? d : null));
 
-/** Пароль необязателен: пустая строка создаёт владельца без пароля. */
-export const setupOwner = (name: string, email: string, password: string): Promise<LoginResult> =>
-  isTauri ? tauri.setupOwner(name, email, password)
-    : fetch('/api/auth/setup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, password }) }).then(jsonOrThrow);
+/** Заводит учётную запись владельца или правит её — строка всегда одна. */
+export const saveOwner = (name: string, email: string): Promise<LoginResult> =>
+  isTauri ? tauri.saveOwner(name, email)
+    : fetch('/api/auth/owner', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email }) }).then(jsonOrThrow);
 
 export const login = (email: string, password: string): Promise<LoginResult> =>
   isTauri ? tauri.login(email, password)
@@ -211,6 +211,11 @@ export const login = (email: string, password: string): Promise<LoginResult> =>
 export const changePassword = (email: string, currentPassword: string, newPassword: string): Promise<void> =>
   isTauri ? tauri.changePassword(email, currentPassword, newPassword)
     : fetch('/api/auth/change-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, currentPassword, newPassword }) }).then(jsonOrThrow).then(() => undefined);
+
+/** Снимает пароль: учётная запись остаётся, приложение снова открывается сразу. */
+export const removePassword = (email: string, currentPassword: string): Promise<void> =>
+  isTauri ? tauri.removePassword(email, currentPassword)
+    : fetch('/api/auth/remove-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, currentPassword }) }).then(jsonOrThrow).then(() => undefined);
 
 export const resetSystem = (adminPassword: string): Promise<void> =>
   isTauri ? tauri.resetSystem(adminPassword)

@@ -296,9 +296,9 @@ export async function resetTables(adminPassword: string, tables: string[]): Prom
   const db = await getDb();
   const rows = await db.select<any[]>("SELECT * FROM users WHERE role = 'ADMIN'");
   const admin = rows[0];
-  // Пароль владельца может быть не задан — тогда сверять нечего, и ступенью
-  // защиты остаётся подтверждение в интерфейсе.
-  if (!admin || (admin.password_hash && !bcrypt.compareSync(adminPassword, admin.password_hash))) {
+  // Учётной записи может не быть вовсе, а у заведённой — пароля. Тогда
+  // сверять нечего, и ступенью защиты остаётся подтверждение в интерфейсе.
+  if (admin?.password_hash && !bcrypt.compareSync(adminPassword, admin.password_hash)) {
     throw new Error('Неверный пароль администратора');
   }
 
@@ -362,15 +362,17 @@ export async function restoreBackup(payload: any): Promise<{ restored: number; t
 
 // ---- Auth (локальная, без JWT) ----
 
-/** Есть ли владелец. Пока нет — показывается экран первичной настройки. */
-export async function authStatus(): Promise<{ needsSetup: boolean; hasPassword: boolean }> {
+/**
+ * Состояние учётной записи. Её может не быть вовсе: приложение открывается
+ * и без неё. Пустой password_hash означает «пароль не задан» — тогда экраны
+ * не просят ни ввода, ни подтверждения.
+ */
+export async function authStatus(): Promise<{ hasOwner: boolean; hasPassword: boolean }> {
   const db = await getDb();
   const rows = await db.select<{ password_hash: string }[]>(
     'SELECT password_hash FROM users ORDER BY id LIMIT 1',
   );
-  // hasPassword отделяет «пароль не задан» от «задан»: пустой password_hash
-  // означает первое, и тогда экраны не просят ни ввода, ни подтверждения.
-  return { needsSetup: rows.length === 0, hasPassword: Boolean(rows[0]?.password_hash) };
+  return { hasOwner: rows.length > 0, hasPassword: Boolean(rows[0]?.password_hash) };
 }
 
 /**
@@ -386,24 +388,39 @@ export async function currentOwner(): Promise<LoginResult | null> {
   return { user: { id: user.id, email: user.email, name: user.name, role: user.role }, token: 'local' };
 }
 
-export async function setupOwner(name: string, email: string, password: string): Promise<LoginResult> {
+/**
+ * Завести или поправить учётную запись владельца — один вызов на оба
+ * случая: строка в таблице всегда одна, и «создать» от «переименовать»
+ * отличается только тем, была ли она до этого.
+ *
+ * Приложение больше не требует учётной записи на старте: её заводят в
+ * профиле и только если она зачем-то понадобилась. Пароля здесь нет — он
+ * добавляется отдельно, тоже по желанию.
+ */
+export async function saveOwner(name: string, email: string): Promise<LoginResult> {
   const db = await getDb();
-  const rows = await db.select<{ c: number }[]>('SELECT count(*) as c FROM users');
-  if ((rows[0]?.c ?? 0) > 0) throw new Error('Владелец уже назначен');
-  if (!email) throw new Error('Нужен email');
-  if (password && password.length < 8) throw new Error('Пароль не короче 8 символов');
+  const cleanName = name.trim();
+  const cleanEmail = email.trim();
+  if (!cleanName && !cleanEmail) throw new Error('Нужно имя или email');
 
-  // Пароль необязателен, и пустой password_hash означает «не задан».
-  // Приложение однопользовательское и лежит на устройстве владельца, поэтому
-  // на первом запуске пароль навязывался зря; задать его можно в настройках.
-  const id = '1';
-  await db.execute(
-    'INSERT INTO users (id, email, password_hash, role, name) VALUES (?, ?, ?, ?, ?)',
-    [id, email, password ? bcrypt.hashSync(password, 10) : '', 'ADMIN', name || email],
-  );
-  await audit(db, 'setup', 'auth', id, email);
+  const rows = await db.select<{ id: string }[]>('SELECT id FROM users ORDER BY id LIMIT 1');
+  const existing = rows[0];
+  const id = existing?.id ?? '1';
+  const displayName = cleanName || cleanEmail;
 
-  return { user: { id, email, name: name || email, role: 'ADMIN' }, token: 'local' };
+  if (existing) {
+    await db.execute('UPDATE users SET name = ?, email = ? WHERE id = ?', [displayName, cleanEmail, id]);
+    await audit(db, 'owner_update', 'auth', id, cleanEmail);
+  } else {
+    // Пустой password_hash — пароль не задан.
+    await db.execute(
+      'INSERT INTO users (id, email, password_hash, role, name) VALUES (?, ?, ?, ?, ?)',
+      [id, cleanEmail, '', 'ADMIN', displayName],
+    );
+    await audit(db, 'owner_create', 'auth', id, cleanEmail);
+  }
+
+  return { user: { id, email: cleanEmail, name: displayName, role: 'ADMIN' }, token: 'local' };
 }
 
 export async function login(email: string, password: string): Promise<LoginResult> {
@@ -430,13 +447,30 @@ export async function changePassword(email: string, currentPassword: string, new
   await db.execute('UPDATE users SET password_hash = ? WHERE id = ?', [bcrypt.hashSync(newPassword, 10), user.id]);
   await audit(db, 'password_change', 'auth', user.id, user.email);
 }
+/**
+ * Снять пароль: учётная запись остаётся, password_hash снова пустой, и
+ * приложение открывается сразу. Текущий пароль спрашиваем — иначе снять его
+ * мог бы любой, кто подошёл к открытому приложению.
+ */
+export async function removePassword(email: string, currentPassword: string): Promise<void> {
+  const db = await getDb();
+  const rows = await db.select<any[]>('SELECT * FROM users WHERE email = ?', [email]);
+  const user = rows[0];
+  if (!user) throw new Error('Неверный текущий пароль');
+  if (user.password_hash && !bcrypt.compareSync(currentPassword, user.password_hash)) {
+    throw new Error('Неверный текущий пароль');
+  }
+  await db.execute("UPDATE users SET password_hash = '' WHERE id = ?", [user.id]);
+  await audit(db, 'password_remove', 'auth', user.id, user.email);
+}
+
 export async function resetSystem(adminPassword: string): Promise<void> {
   const db = await getDb();
   const rows = await db.select<any[]>("SELECT * FROM users WHERE role = 'ADMIN'");
   const admin = rows[0];
-  // Пароль владельца может быть не задан — тогда сверять нечего, и ступенью
-  // защиты остаётся подтверждение в интерфейсе.
-  if (!admin || (admin.password_hash && !bcrypt.compareSync(adminPassword, admin.password_hash))) {
+  // Учётной записи может не быть вовсе, а у заведённой — пароля. Тогда
+  // сверять нечего, и ступенью защиты остаётся подтверждение в интерфейсе.
+  if (admin?.password_hash && !bcrypt.compareSync(adminPassword, admin.password_hash)) {
     throw new Error('Неверный пароль администратора');
   }
   // users намеренно не трогаем: учётная запись владельца должна пережить

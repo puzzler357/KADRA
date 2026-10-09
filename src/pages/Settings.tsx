@@ -35,12 +35,16 @@ export default function Settings() {
   const notify = useNotify();
   const [activeTab, setActiveTab] = useState('general');
 
-  // Пароль владельца может быть не задан: тогда подтверждать сброс нечем,
-  // менять нечего, а тумблер запроса при входе недоступен — включить запрос
-  // несуществующего пароля значило бы запереть владельца на экране входа.
+  // Учётной записи может не быть вовсе, а у существующей может не быть
+  // пароля. Тогда подтверждать сброс нечем, менять нечего, а тумблер запроса
+  // при входе недоступен: включить запрос несуществующего пароля значило бы
+  // запереть владельца на экране входа.
+  const [hasOwner, setHasOwner] = useState(false);
   const [hasPassword, setHasPassword] = useState(false);
   useEffect(() => {
-    api.authStatus().then(status => setHasPassword(status.hasPassword)).catch(() => undefined);
+    api.authStatus()
+      .then(status => { setHasOwner(status.hasOwner); setHasPassword(status.hasPassword); })
+      .catch(() => undefined);
   }, []);
 
   
@@ -395,7 +399,9 @@ export default function Settings() {
                   <h3 className="text-lg font-medium">{t('settings.password.title')}</h3>
                 </div>
                 <p className="text-sm text-muted mb-6">
-                  {hasPassword ? t('settings.password.hint') : t('settings.password.hintNoPassword')}
+                  {!hasOwner ? t('settings.password.hintNoOwner')
+                    : hasPassword ? t('settings.password.hint')
+                      : t('settings.password.hintNoPassword')}
                 </p>
 
                 <div className="space-y-4 max-w-xl">
@@ -432,9 +438,33 @@ export default function Settings() {
                     } catch (e) {
                       notify.error(e instanceof Error ? e.message : t('settings.password.error'));
                     }
-                  }} className="bg-accent-500 hover:bg-accent-600 text-white px-6 py-2.5 rounded-xl font-medium transition-colors mt-2 text-sm">
+                  }} disabled={!hasOwner} className="bg-accent-500 hover:bg-accent-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-xl font-medium transition-colors mt-2 text-sm">
                     {t('settings.password.save')}
                   </button>
+
+                  {/* Снятие пароля — обратная операция к установке: приложение
+                      снова начнёт открываться сразу. Запрос пароля при входе
+                      выключаем тем же действием, иначе владелец остался бы
+                      перед формой, к которой подходить уже нечему. */}
+                  {hasPassword && (
+                    <button onClick={async () => {
+                      if (!(await notify.confirm(t('settings.password.removeConfirm'), { danger: true }))) return;
+                      try {
+                        await api.removePassword(user?.email || '', currentPassword);
+                        setHasPassword(false);
+                        setRequirePassword(false);
+                        setCurrentPassword('');
+                        setNewPassword('');
+                        setConfirmPassword('');
+                        logSetting('password', 'removed');
+                        notify.success(t('settings.password.removed'));
+                      } catch (e) {
+                        notify.error(e instanceof Error ? e.message : t('settings.password.removeError'));
+                      }
+                    }} className="border border-rose-500/40 text-rose-400 hover:bg-rose-500/10 px-6 py-2.5 rounded-xl font-medium transition-colors text-sm">
+                      {t('settings.password.remove')}
+                    </button>
+                  )}
                 </div>
               </div>
 

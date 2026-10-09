@@ -31,14 +31,13 @@ function audit(action: string, entity: string, entityId?: string | null, diff?: 
 }
 
 // API Auth
-// Есть ли владелец. Пока нет — приложение показывает экран первичной
-// настройки вместо входа: пароль по умолчанию в поставке не предусмотрен.
+// Состояние учётной записи. Её может не быть вовсе: приложение открывается
+// и без неё. Пустой password_hash означает «пароль не задан» — тогда экраны
+// не просят ни ввода, ни подтверждения.
 app.get('/api/auth/status', (_req, res) => {
   const owner = db.prepare('SELECT password_hash FROM users ORDER BY id LIMIT 1').get() as
     { password_hash: string } | undefined;
-  // hasPassword отделяет «пароль не задан» от «задан»: пустой password_hash
-  // означает первое, и тогда экраны не просят ни ввода, ни подтверждения.
-  res.json({ needsSetup: !owner, hasPassword: Boolean(owner?.password_hash) });
+  res.json({ hasOwner: Boolean(owner), hasPassword: Boolean(owner?.password_hash) });
 });
 
 // Владелец без проверки пароля. Нужен для входа, когда пароль при входе
@@ -50,28 +49,38 @@ app.get('/api/auth/owner', (_req, res) => {
   res.json({ user, token });
 });
 
-app.post('/api/auth/setup', (req, res) => {
-  const { name, email, password } = req.body ?? {};
+// Завести или поправить учётную запись владельца. Запрос один на оба
+// случая: строка в таблице всегда одна, и «создать» от «переименовать»
+// отличается только тем, была ли она до этого.
+//
+// Приложение больше не требует учётной записи на старте — она заводится в
+// профиле и только если владельцу зачем-то понадобилась. Пароля здесь нет:
+// он добавляется отдельно, тоже по желанию.
+app.post('/api/auth/owner', (req, res) => {
+  const { name, email } = req.body ?? {};
+  const cleanName = String(name ?? '').trim();
+  const cleanEmail = String(email ?? '').trim();
 
-  const { c } = db.prepare('SELECT count(*) as c FROM users').get() as { c: number };
-  if (c > 0) return res.status(409).json({ error: 'Владелец уже назначен' });
-
-  if (!email) return res.status(400).json({ error: 'Нужен email' });
-  if (password && String(password).length < 8) {
-    return res.status(400).json({ error: 'Пароль не короче 8 символов' });
+  if (!cleanName && !cleanEmail) {
+    return res.status(400).json({ error: 'Нужно имя или email' });
   }
 
-  // Пароль необязателен, и пустой password_hash означает «не задан».
-  // Приложение однопользовательское и лежит на устройстве владельца, поэтому
-  // на первом запуске пароль навязывался зря; задать его можно в настройках.
-  const id = '1';
-  db.prepare('INSERT INTO users (id, email, password_hash, role, name) VALUES (?, ?, ?, ?, ?)')
-    .run(id, email, password ? bcrypt.hashSync(String(password), 10) : '', 'ADMIN', name || email);
+  const existing = db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get() as { id: string } | undefined;
+  const id = existing?.id ?? '1';
+  const displayName = cleanName || cleanEmail;
 
-  audit('setup', 'auth', id, email);
+  if (existing) {
+    db.prepare('UPDATE users SET name = ?, email = ? WHERE id = ?').run(displayName, cleanEmail, id);
+    audit('owner_update', 'auth', id, cleanEmail);
+  } else {
+    // Пустой password_hash — пароль не задан.
+    db.prepare('INSERT INTO users (id, email, password_hash, role, name) VALUES (?, ?, ?, ?, ?)')
+      .run(id, cleanEmail, '', 'ADMIN', displayName);
+    audit('owner_create', 'auth', id, cleanEmail);
+  }
 
   const token = jwt.sign({ id, role: 'ADMIN' }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({ user: { id, email, name: name || email, role: 'ADMIN' }, token });
+  res.json({ user: { id, email: cleanEmail, name: displayName, role: 'ADMIN' }, token });
 });
 
 app.post('/api/auth/login', (req, res) => {
@@ -106,13 +115,31 @@ app.post('/api/auth/change-password', (req, res) => {
   res.json({ success: true });
 });
 
+// Снять пароль: учётная запись остаётся, password_hash снова пустой, и
+// приложение открывается сразу. Текущий пароль спрашиваем — иначе снять его
+// мог бы любой, кто подошёл к открытому приложению.
+app.post('/api/auth/remove-password', (req, res) => {
+  const { email, currentPassword } = req.body ?? {};
+
+  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email) as any;
+  if (!user) return res.status(401).json({ error: 'Неверный текущий пароль' });
+  if (user.password_hash && !bcrypt.compareSync(String(currentPassword ?? ''), user.password_hash)) {
+    return res.status(401).json({ error: 'Неверный текущий пароль' });
+  }
+
+  db.prepare("UPDATE users SET password_hash = '' WHERE id = ?").run(user.id);
+  audit('password_remove', 'auth', user.id, user.email);
+
+  res.json({ success: true });
+});
+
 app.post('/api/auth/reset-system', (req, res) => {
   const { adminPassword } = req.body;
   
   const admin = db.prepare('SELECT * FROM users WHERE role = ?').get('ADMIN') as any;
-  // Пароль владельца может быть не задан — тогда сверять нечего, и ступенью
-  // защиты остаётся подтверждение в интерфейсе.
-  if (!admin || (admin.password_hash && !bcrypt.compareSync(String(adminPassword ?? ''), admin.password_hash))) {
+  // Учётной записи может не быть вовсе, а у заведённой — пароля. Тогда
+  // сверять нечего, и ступенью защиты остаётся подтверждение в интерфейсе.
+  if (admin?.password_hash && !bcrypt.compareSync(String(adminPassword ?? ''), admin.password_hash)) {
     return res.status(401).json({ error: 'Неверный пароль администратора' });
   }
   
@@ -206,9 +233,9 @@ app.post('/api/reset/tables', (req, res) => {
   const { adminPassword, tables } = req.body ?? {};
 
   const admin = db.prepare('SELECT * FROM users WHERE role = ?').get('ADMIN') as any;
-  // Пароль владельца может быть не задан — тогда сверять нечего, и ступенью
-  // защиты остаётся подтверждение в интерфейсе.
-  if (!admin || (admin.password_hash && !bcrypt.compareSync(String(adminPassword ?? ''), admin.password_hash))) {
+  // Учётной записи может не быть вовсе, а у заведённой — пароля. Тогда
+  // сверять нечего, и ступенью защиты остаётся подтверждение в интерфейсе.
+  if (admin?.password_hash && !bcrypt.compareSync(String(adminPassword ?? ''), admin.password_hash)) {
     return res.status(401).json({ error: 'Неверный пароль администратора' });
   }
 

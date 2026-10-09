@@ -38,7 +38,7 @@ export default function App() {
   const { user, startScreen, locked, requirePassword, login } = useAppStore();
   const { fetchAll, error } = useDatabaseStore();
 
-  // Вход без пароля не мгновенный — это запрос к базе.
+  // Проверка владельца не мгновенная — это запрос к базе.
   const [ownerChecked, setOwnerChecked] = useState(false);
 
   useIdleLock();
@@ -51,7 +51,8 @@ export default function App() {
 
     let cancelled = false;
     api.currentOwner()
-      // Владельца ещё нет — Login покажет экран первичной настройки.
+      // null — учётной записи нет вовсе. Это рабочее состояние: приложение
+      // открывается и без неё, а заводят её в профиле, если понадобилась.
       .then((owner) => { if (!cancelled && owner) login(owner.user, owner.token); })
       .catch(() => undefined)
       .finally(() => { if (!cancelled) setOwnerChecked(true); });
@@ -59,19 +60,27 @@ export default function App() {
     return () => { cancelled = true; };
   }, [user, requirePassword, login]);
 
+  // Данные грузим, как только стало понятно, под кем работаем. Ждать user
+  // нельзя: без учётной записи он так и останется пустым, а приложение
+  // должно работать.
+  const ready = Boolean(user) || ownerChecked;
   useEffect(() => {
-    if (user) {
+    if (ready) {
       fetchAll();
     }
-  }, [user, fetchAll]);
+  }, [ready, fetchAll]);
 
-  if (!user) {
-    // Пока автоматический вход не отработал, форму показывать нельзя:
-    // она мигнёт и исчезнет.
-    if (!requirePassword && !ownerChecked) {
-      return <div className="min-h-screen bg-[var(--background)]" />;
-    }
+  // Экран входа — только если владелец сам включил запрос пароля. Включить
+  // его можно, лишь задав пароль, так что учётная запись к этому моменту
+  // точно есть.
+  if (requirePassword && !user) {
     return <Login />;
+  }
+
+  // Пока проверка владельца не отработала, рисовать нечего: имя в шапке
+  // мигнуло бы.
+  if (!ready) {
+    return <div className="min-h-screen bg-[var(--background)]" />;
   }
 
   // Блокировка закрывает приложение целиком: данные не должны оставаться

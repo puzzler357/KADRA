@@ -85,18 +85,33 @@ describe('посев экранов', () => {
   });
 });
 
-describe('первичная настройка', () => {
-  it('после создания владельца статус больше не требует настройки', async () => {
+describe('учётная запись владельца', () => {
+  it('статус сообщает, что владелец заведён и пароль у него есть', async () => {
     const { status, body } = await api('GET', '/api/auth/status');
     expect(status).toBe(200);
-    expect(body.needsSetup).toBe(false);
+    expect(body.hasOwner).toBe(true);
+    expect(body.hasPassword).toBe(true);
   });
 
-  it('повторная настройка отклоняется — владелец уже назначен', async () => {
-    const { status } = await api('POST', '/api/auth/setup', {
-      name: 'Второй', email: 'second@example.com', password: 'another-password',
+  // Запрос один на создание и на правку, поэтому важно, что второй вызов
+  // правит ту же строку: вторая учётная запись сломала бы всё остальное.
+  it('повторное сохранение правит ту же запись, а не заводит вторую', async () => {
+    const renamed = await api('POST', '/api/auth/owner', {
+      name: 'Переименованный', email: OWNER_EMAIL,
     });
-    expect(status).toBe(409);
+    expect(renamed.status).toBe(200);
+    expect(renamed.body.user.name).toBe('Переименованный');
+
+    const owner = await api('GET', '/api/auth/owner');
+    expect(owner.body.user.name).toBe('Переименованный');
+
+    // Возвращаем как было: база общая с остальными файлами.
+    await api('POST', '/api/auth/owner', { name: 'Владелец Устройства', email: OWNER_EMAIL });
+  });
+
+  it('пустой запрос отклоняется — сохранять нечего', async () => {
+    const { status } = await api('POST', '/api/auth/owner', { name: '  ', email: '' });
+    expect(status).toBe(400);
   });
 });
 
