@@ -6,20 +6,17 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { useDatabaseStore } from '../store/useDatabaseStore';
 import { useMoney } from '../lib/money';
 import { payrollTotal } from '../lib/payroll';
+import { positionStats, staffingSummary } from '../lib/staffing';
+import { auditActionLabel, auditEntityLabel, auditTime } from '../lib/audit';
 import { CardsSkeleton } from '../components/States';
 import { clickable } from '../lib/a11y';
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#3b82f6', '#ec4899'];
 
-const recentEvents = [
-  { id: 1, title: 'Обновление ШР', desc: 'Утверждена новая версия штатного расписания', time: '5 часов назад' },
-  { id: 2, title: 'Справка выдана', desc: 'Справка о доходах для Смирновой А.', time: 'Вчера' },
-];
-
 export default function Dashboard() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { employees, loading } = useDatabaseStore();
+  const { employees, positions, departments, auditLog, loading } = useDatabaseStore();
   const templateCount = useDatabaseStore(s => s.templates.length);
   const money = useMoney();
 
@@ -39,6 +36,21 @@ export default function Dashboard() {
   // подстановка 85 000 каждому сотруднику без оклада: это были выдуманные
   // деньги в отчётной цифре.
   const totalFOT = useMemo(() => payrollTotal(employees), [employees]);
+
+  // Вакансии считаются по штатному расписанию — тем же кодом, что и сводка
+  // в «Штатном расписании». Раньше здесь стояла формула-заглушка
+  // max(N + 4, 10) − N, дававшая 4 при любом штате от шести человек.
+  const vacancies = useMemo(
+    () => staffingSummary(positionStats(positions, employees, departments)).vacant,
+    [positions, employees, departments],
+  );
+
+  // Недавние события — последние записи журнала аудита. Раньше здесь висели
+  // две неизменные строки про «Смирнову А.», не связанные ни с чем.
+  const recentEvents = useMemo(
+    () => [...auditLog].sort((a, b) => b.ts.localeCompare(a.ts)).slice(0, 6),
+    [auditLog],
+  );
 
   const departmentData = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -74,14 +86,14 @@ export default function Dashboard() {
         </div>
         
         <div
-          {...clickable(() => navigate('/recruiting'))}
+          {...clickable(() => navigate('/org-chart'))}
           className="bg-[var(--sidebar-bg)] border border-[var(--border-color)] rounded-2xl p-6 shadow-sm cursor-pointer hover:border-accent-500/50 hover:shadow-md transition-all"
         >
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-medium text-muted">{t('dashboard.vacancies')}</h3>
             <Network className="w-5 h-5 text-amber-500" />
           </div>
-          <p className="text-3xl font-semibold tabular-nums text-primary dark:text-primary">{Math.max(employees.length + 4, 10) - employees.length}</p>
+          <p className="text-3xl font-semibold tabular-nums text-primary dark:text-primary">{vacancies}</p>
           <p className="text-sm text-amber-600 mt-2">{t('dashboard.needsAttention')}</p>
         </div>
         
@@ -117,13 +129,20 @@ export default function Dashboard() {
             {recentEvents.map(event => (
               <div key={event.id} className="flex gap-4">
                 <div className="w-2 h-2 mt-2 rounded-full bg-accent-500 flex-shrink-0" />
-                <div>
-                  <p className="font-medium text-sm text-primary dark:text-slate-100">{event.title}</p>
-                  <p className="text-sm text-muted">{event.desc}</p>
-                  <p className="text-xs text-muted mt-1">{event.time}</p>
+                <div className="min-w-0">
+                  <p className="font-medium text-sm text-primary dark:text-slate-100">
+                    {auditActionLabel(t, event.action)}
+                  </p>
+                  <p className="text-sm text-muted truncate" title={event.diff || undefined}>
+                    {auditEntityLabel(t, event.entity)}{event.diff ? ' · ' + event.diff : ''}
+                  </p>
+                  <p className="text-xs text-muted mt-1 tabular-nums">{auditTime(event.ts)}</p>
                 </div>
               </div>
             ))}
+            {recentEvents.length === 0 && (
+              <p className="text-sm text-muted">{t('dashboard.noEvents')}</p>
+            )}
           </div>
         </div>
         <div className="bg-[var(--sidebar-bg)] border border-[var(--border-color)] rounded-2xl p-6 shadow-sm min-h-[300px]">

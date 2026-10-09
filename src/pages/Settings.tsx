@@ -9,6 +9,7 @@ import LicenseSettings from '../components/LicenseSettings';
 import { useMoney } from '../lib/money';
 import type { CurrencyDecimals, CurrencyPosition, ThousandsSeparator } from '../lib/money';
 import * as api from '../data';
+import { auditActionLabel, auditEntityLabel } from '../lib/audit';
 import PasswordInput from '../components/PasswordInput';
 import { Settings as SettingsIcon, ShieldCheck, Key, Shield, Database, Link, Palette, Download, RefreshCw, Check, Sun, Moon, Monitor } from 'lucide-react';
 import { clickable } from '../lib/a11y';
@@ -75,8 +76,8 @@ export default function Settings() {
   const handleAuditExport = async () => {
     await exportToExcel(filteredAudit.map(a => ({
       [t('settings.audit.datetime')]: a.ts.replace('T', ' ').slice(0, 19),
-      [t('settings.audit.action')]: a.action,
-      [t('settings.audit.entity')]: a.entity,
+      [t('settings.audit.action')]: auditActionLabel(t, a.action),
+      [t('settings.audit.entity')]: auditEntityLabel(t, a.entity),
       [t('settings.audit.diff')]: a.diff ?? '',
     })), 'AuditLog');
   };
@@ -152,6 +153,16 @@ export default function Settings() {
   // файлов: браузеру негде держать копии, поэтому сам файл сохраняется у
   // пользователя, а приложение помнит, что и когда выгружалось.
   const [backupBusy, setBackupBusy] = useState(false);
+
+  // Автоматических копий в программе нет, и обещать их на этом экране было
+  // прямым обманом: человек полагался бы на копии, которых никто не делает.
+  // Вместо обещания — дата последней копии и предупреждение, если она стара.
+  const lastBackup = useMemo(
+    () => backups.reduce<string | null>((latest, b) => (!latest || b.createdAt > latest ? b.createdAt : latest), null),
+    [backups],
+  );
+  const backupIsStale = lastBackup === null
+    || Date.now() - new Date(lastBackup).getTime() > 7 * 24 * 60 * 60 * 1000;
   const restoreInputRef = useRef<HTMLInputElement>(null);
 
   const handleCreateBackup = async () => {
@@ -641,7 +652,7 @@ export default function Settings() {
                         className="w-full bg-app border border-line rounded-xl px-4 py-2 text-sm focus:outline-none text-secondary"
                       >
                         <option value="all">{t('settings.audit.all')}</option>
-                        {auditActions.map(a => <option key={a} value={a}>{a}</option>)}
+                        {auditActions.map(a => <option key={a} value={a}>{auditActionLabel(t, a)}</option>)}
                       </select>
                     </div>
                     <div className="flex-1">
@@ -652,7 +663,7 @@ export default function Settings() {
                         className="w-full bg-app border border-line rounded-xl px-4 py-2 text-sm focus:outline-none text-secondary"
                       >
                         <option value="all">{t('settings.audit.all')}</option>
-                        {auditEntities.map(e => <option key={e} value={e}>{e}</option>)}
+                        {auditEntities.map(e => <option key={e} value={e}>{auditEntityLabel(t, e)}</option>)}
                       </select>
                     </div>
                     <div className="flex-1">
@@ -694,8 +705,8 @@ export default function Settings() {
                           <td className="p-table text-table whitespace-nowrap">{a.ts.replace('T', ' ').slice(0, 19)}</td>
                           {/* Приложение однопользовательское: действующее лицо — владелец устройства. */}
                           <td className="p-table text-accent-400">{user?.name || t('user.owner')}</td>
-                          <td className="p-table text-table">{a.action}</td>
-                          <td className="p-table text-table">{a.entity}</td>
+                          <td className="p-table text-table">{auditActionLabel(t, a.action)}</td>
+                          <td className="p-table text-table">{auditEntityLabel(t, a.entity)}</td>
                           <td className="p-table font-mono text-xs">{a.diff || a.entityId || '—'}</td>
                         </tr>
                       ))}
@@ -726,7 +737,13 @@ export default function Settings() {
                     <Database className="w-5 h-5 text-accent-400" />
                     <h4 className="text-lg font-medium">{t('settings.backup.createFull')}</h4>
                   </div>
-                  <p className="text-sm text-muted">{t('settings.backup.autoInfo')} <span className="bg-surface-3 px-1.5 py-0.5 rounded text-secondary text-xs">/app/backups</span></p>
+                  <p className="text-sm text-muted">{t('settings.backup.manualInfo')}</p>
+                  <p className={`text-sm mt-2 ${backupIsStale ? 'text-amber-500' : 'text-muted'}`}>
+                    {lastBackup
+                      ? t('settings.backup.lastCopy', { date: lastBackup.replace('T', ' ').slice(0, 16) })
+                      : t('settings.backup.neverCopied')}
+                    {lastBackup && backupIsStale ? ' · ' + t('settings.backup.stale') : ''}
+                  </p>
                 </div>
                 <div className="flex items-center gap-3 flex-shrink-0">
                   <input
