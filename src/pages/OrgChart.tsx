@@ -232,15 +232,8 @@ export default function OrgChart() {
                     </tr>
                   ) : (
                     stats.map((pos, idx) => (
-                      <tr key={idx} className="hover:bg-surface-hover dark:hover:bg-slate-900 transition-colors group">
-                        <td className="p-table text-table font-medium">
-                          <div className="flex items-center justify-between">
-                            <span>{pos.title}</span>
-                            <div className="hidden group-hover:flex items-center gap-1">
-                               {/* Edit/Delete mock UI */}
-                            </div>
-                          </div>
-                        </td>
+                      <tr key={idx} className="hover:bg-surface-hover dark:hover:bg-slate-900 transition-colors">
+                        <td className="p-table text-table font-medium">{pos.title}</td>
                         <td className="p-table text-table text-center text-emerald-600 dark:text-emerald-400">{pos.occupied}</td>
                         <td className="p-table text-table text-center text-amber-600 dark:text-amber-400">{pos.vacant}</td>
                         <td className="p-table text-table text-right font-medium">{pos.total}</td>
