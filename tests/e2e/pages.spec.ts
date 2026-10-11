@@ -18,8 +18,13 @@ test.describe('обход всех страниц приложения', () => {
       await expect(page.locator('main')).toBeVisible();
       await expect(page.locator('nav')).toBeVisible();
 
-      const text = (await page.locator('main').innerText()).trim();
-      expect(text.length, `Страница ${path} отрисовала пустой main`).toBeGreaterThan(0);
+      // Экраны грузятся по требованию (React.lazy в App.tsx): main появляется
+      // раньше, чем пришёл файл экрана, поэтому ждём текст, а не читаем сразу.
+      await expect
+        .poll(async () => (await page.locator('main').innerText()).trim().length, {
+          message: `Страница ${path} отрисовала пустой main`,
+        })
+        .toBeGreaterThan(0);
 
       // Даём догрузиться запросам к /api, которые страница делает при монтировании.
       await page.waitForLoadState('networkidle');

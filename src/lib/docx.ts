@@ -1,9 +1,12 @@
-import Docxtemplater from 'docxtemplater';
-import PizZip from 'pizzip';
-import { saveAs } from 'file-saver';
-
+// Библиотеки для .docx нужны только в момент генерации документа — грузим
+// их тогда же, а не при старте приложения.
 export const generateDocx = async (templateUrl: string, data: any, outputName: string) => {
   try {
+    const [{ default: Docxtemplater }, { default: PizZip }, { saveAs }] = await Promise.all([
+      import('docxtemplater'),
+      import('pizzip'),
+      import('file-saver'),
+    ]);
     const response = await fetch(templateUrl);
     const content = await response.arrayBuffer();
     

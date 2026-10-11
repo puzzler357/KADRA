@@ -4,9 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useDatabaseStore } from '../store/useDatabaseStore';
 import { useMoney } from '../lib/money';
 import { Download, Printer, FileText } from 'lucide-react';
-import { saveAs } from 'file-saver';
-import * as XLSX from 'xlsx';
-import html2pdf from 'html2pdf.js';
+import { exportSheet } from '../lib/excel';
 
 export default function Archive() {
   const { t } = useTranslation();
@@ -92,15 +90,10 @@ export default function Archive() {
       [t('employees.col.salary')]: a.salary,
       [t('archive.workedHours')]: a.hoursWorked
     }));
-    const worksheet = XLSX.utils.json_to_sheet(data);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, t('archive.sheetName'));
-    const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
-    const dataBlob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    saveAs(dataBlob, `archive_${selectedYear}.xlsx`);
+    void exportSheet(data, t('archive.sheetName'), `archive_${selectedYear}.xlsx`);
   };
 
-  const handleExportPDF = () => {
+  const handleExportPDF = async () => {
     const element = document.getElementById('archive-table-container');
     if (!element) return;
     const opt = {
@@ -110,7 +103,11 @@ export default function Archive() {
       html2canvas:  { scale: 2 },
       jsPDF:        { unit: 'in', format: 'letter', orientation: 'landscape' as const }
     };
-    void withFullTable(() => html2pdf().set(opt).from(element).save());
+    // html2pdf тянет html2canvas и jsPDF — грузим только при выгрузке в PDF,
+    // и до того, как развернуть таблицу целиком, чтобы она не висела
+    // развёрнутой, пока скачивается библиотека.
+    const { default: html2pdf } = await import('html2pdf.js');
+    await withFullTable(() => html2pdf().set(opt).from(element).save());
   };
 
   const handlePrint = () => {
