@@ -6,10 +6,11 @@ import { ENTITY_BY_TABLE } from './entities';
 import type {
   Employee, Department, Position, TimesheetRecord, ArchiveRecord, ArchiveFilters, Template, LoginResult,
 } from './types';
+import { newId } from '../lib/id';
 
 export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
-const rid = () => Math.random().toString(36).substring(7);
+const rid = newId;
 
 async function jsonOrThrow(res: Response): Promise<any> {
   const data = await res.json().catch(() => ({}));

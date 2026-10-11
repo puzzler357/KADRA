@@ -14,12 +14,13 @@ import {
 import { employeePatchFor, employeeUpdate } from './movements';
 import { shellDb, isReadOnlyError } from './shellDb';
 import type { ShellDb, SqlStatement } from './shellDb';
+import { newId } from '../lib/id';
 
 async function getDb(): Promise<ShellDb> {
   return shellDb;
 }
 
-const rid = () => Math.random().toString(36).substring(7);
+const rid = newId;
 
 const AUDIT_INSERT = 'INSERT INTO audit_log (id, ts, action, entity, entity_id, diff) VALUES (?, ?, ?, ?, ?, ?)';
 

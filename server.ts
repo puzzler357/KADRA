@@ -1,7 +1,8 @@
 import './src/env';
 import express from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import path from 'path';
-import cors from 'cors';
+import { randomBytes, randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { createServer as createViteServer } from 'vite';
@@ -11,10 +12,89 @@ import { employeePatchFor, employeeUpdate } from './src/data/movements';
 
 export const app = express();
 const PORT = Number(process.env.PORT) || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-local-key-2024';
 
-app.use(cors());
-app.use(express.json());
+// Адрес, на котором слушает сервер. По умолчанию — только этот компьютер:
+// кадровые данные не должны быть видны всей локальной сети. Открыть сервер
+// в сеть можно явно, HOST=0.0.0.0, — и тогда это осознанное решение.
+const HOST = process.env.HOST || '127.0.0.1';
+
+// Секрет подписи JWT. Встроенного значения больше нет: оно лежало бы в
+// открытом коде и позволяло бы подделать токен. Без JWT_SECRET секрет
+// случайный на каждый запуск — токены сервер сам не проверяет, клиент лишь
+// хранит их, так что смена секрета при перезапуске ничего не ломает.
+const JWT_SECRET = process.env.JWT_SECRET || randomBytes(32).toString('hex');
+
+/** Идентификатор новой записи: 122 случайных бита, без шанса совпадения. */
+const makeId = () => randomUUID();
+
+// ---- Защита API от чужих сайтов и от сети ----
+//
+// Сервер отвечает браузеру владельца, и только ему. Опасность — не только
+// другие компьютеры сети (их отсекает HOST), но и любая открытая в том же
+// браузере вкладка: страница с чужого сайта может отправить запрос на
+// http://localhost:3000. Раньше cors() разрешал ей ещё и читать ответы,
+// а простой POST формой (его браузер шлёт без предварительной проверки)
+// доходил до сброса данных и без этого.
+
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+
+const hostnameOf = (value: string | undefined): string | null => {
+  if (!value) return null;
+  try {
+    return new URL(value.includes('://') ? value : `http://${value}`).hostname;
+  } catch {
+    return null;
+  }
+};
+
+const isLoopback = (hostname: string | null): boolean =>
+  hostname !== null && (LOOPBACK_HOSTS.has(hostname) || hostname.endsWith('.localhost'));
+
+/** Сервер открыт только этому компьютеру — тогда и Host обязан быть локальным. */
+const servesLoopbackOnly = (): boolean => isLoopback(hostnameOf(HOST));
+
+export function guardRequest(req: Request, res: Response, next: NextFunction) {
+  // Host: защита от DNS rebinding — чужой домен, который «переехал» на
+  // 127.0.0.1, приходит с собственным именем в Host.
+  if (servesLoopbackOnly() && !isLoopback(hostnameOf(req.headers.host))) {
+    return res.status(403).json({ error: 'Доступ разрешён только с этого компьютера' });
+  }
+
+  if (!req.path.startsWith('/api/')) return next();
+
+  // Браузер сам помечает запросы со сторонних сайтов. Подделать эти
+  // заголовки страница не может.
+  if (req.headers['sec-fetch-site'] === 'cross-site') {
+    return res.status(403).json({ error: 'Запрос с другого сайта отклонён' });
+  }
+
+  // Origin браузер ставит на любой запрос, изменяющий данные, если тот
+  // пришёл не со страницы самого приложения. Разрешаем только свой адрес
+  // (а при работе на этом компьютере — любой локальный порт, это тоже мы).
+  const origin = req.headers.origin;
+  // Origin «null» (локальный файл, песочница iframe) сюда тоже попадает и
+  // отклоняется: своего адреса у такой страницы нет.
+  if (origin !== undefined) {
+    let originHost: string | null = null;
+    try { originHost = new URL(origin).host; } catch { /* «null» и мусор */ }
+    const sameOrigin = originHost !== null && originHost === req.headers.host;
+    const bothLocal = originHost !== null
+      && isLoopback(hostnameOf(origin)) && isLoopback(hostnameOf(req.headers.host));
+    if (!sameOrigin && !bothLocal) {
+      return res.status(403).json({ error: 'Запрос с другого сайта отклонён' });
+    }
+  }
+
+  next();
+}
+
+app.use(guardRequest);
+
+// Лимит тела запроса. По умолчанию express принимает 100 КБ — это меньше,
+// чем импорт 2 000 сотрудников, а на целевом объёме (10 000 сотрудников и год
+// табеля) резервная копия весит около 60 МБ и не восстановилась бы вовсе.
+// Сервер доступен только с этого компьютера, поэтому большой лимит безопасен.
+app.use(express.json({ limit: '200mb' }));
 
 // Журнал аудита пишется здесь, а не на экранах: событие должно попадать в
 // журнал вместе с самим изменением, а не тогда, когда клиент про это вспомнит.
@@ -24,7 +104,7 @@ const insertAudit = () => db.prepare(
 
 function audit(action: string, entity: string, entityId?: string | null, diff?: string | null) {
   insertAudit().run(
-    Math.random().toString(36).substring(2, 12),
+    makeId(),
     new Date().toISOString(),
     action, entity, entityId ?? null, diff ?? null,
   );
@@ -170,7 +250,7 @@ for (const entity of ENTITIES) {
   const logged = entity.table !== AUDIT_TABLE;
 
   app.post(base, (req, res) => {
-    const id = req.body.id || Math.random().toString(36).substring(7);
+    const id = req.body.id || makeId();
     db.prepare(insertSql(entity)).run(id, ...objectToValues(entity, req.body));
     if (logged) audit('create', entity.table, id, null);
     res.json({ id });
@@ -212,7 +292,7 @@ app.post('/api/movements/apply', (req, res) => {
   };
 
   const entity = ENTITY_BY_TABLE.get('movements')!;
-  const id = movement.id || Math.random().toString(36).substring(7);
+  const id = movement.id || makeId();
   const patch = employeePatchFor(record);
   const update = employeeUpdate(patch);
 
@@ -329,11 +409,9 @@ const insertEmployee = () => db.prepare(
   'INSERT INTO employees (id, full_name, position, department, status, hire_date, tab_number, birth_date, payment_type, salary, rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
 );
 
-const newEmployeeId = () => Math.random().toString(36).substring(7);
-
 app.post('/api/employees', (req, res) => {
   const { id, fullName, position, department, status, hireDate, tabNumber, birthDate, paymentType = 'salary', salary = 0, rate = 1 } = req.body;
-  const newId = id || newEmployeeId();
+  const newId = id || makeId();
   insertEmployee().run(newId, fullName, position, department, status, hireDate, tabNumber ?? null, birthDate, paymentType, salary, rate);
   audit('create', 'employees', newId, fullName);
   res.json({ id: newId });
@@ -348,7 +426,7 @@ app.post('/api/employees/bulk', (req, res) => {
   const ids: string[] = [];
   db.transaction(() => {
     for (const e of rows) {
-      const newId = e.id || newEmployeeId();
+      const newId = e.id || makeId();
       stmt.run(newId, e.fullName, e.position, e.department, e.status, e.hireDate, e.tabNumber ?? null, e.birthDate ?? null, e.paymentType ?? 'salary', e.salary ?? 0, e.rate ?? 1);
       ids.push(newId);
     }
@@ -381,7 +459,7 @@ app.get('/api/departments', (_req, res) => {
 });
 app.post('/api/departments', (req, res) => {
   const { id, name, parentId } = req.body;
-  const newId = id || Math.random().toString(36).substring(7);
+  const newId = id || makeId();
   db.prepare('INSERT INTO departments (id, name, parent_id) VALUES (?, ?, ?)').run(newId, name, parentId || null);
   audit('create', 'departments', newId, name);
   res.json({ id: newId });
@@ -406,7 +484,7 @@ app.get('/api/positions', (_req, res) => {
 });
 app.post('/api/positions', (req, res) => {
   const { id, departmentId, title, maxCount, salary } = req.body;
-  const newId = id || Math.random().toString(36).substring(7);
+  const newId = id || makeId();
   db.prepare('INSERT INTO positions (id, department_id, title, max_count, salary) VALUES (?, ?, ?, ?, ?)').run(newId, departmentId, title, maxCount, salary);
   audit('create', 'positions', newId, title);
   res.json({ id: newId });
@@ -435,7 +513,7 @@ app.get('/api/templates', (_req, res) => {
 
 app.post('/api/templates', (req, res) => {
   const { id, name, blocks } = req.body;
-  const newId = id || Math.random().toString(36).substring(7);
+  const newId = id || makeId();
   db.prepare('INSERT INTO templates (id, name, blocks) VALUES (?, ?, ?)')
     .run(newId, name, JSON.stringify(blocks));
   audit('create', 'templates', newId, name);
@@ -478,7 +556,7 @@ app.get('/api/timesheets', (req, res) => {
 
 app.post('/api/timesheets', (req, res) => {
   const { id, year, month, employeeId, days } = req.body;
-  const newId = id || Math.random().toString(36).substring(7);
+  const newId = id || makeId();
   db.prepare('INSERT INTO timesheets (id, year, month, employee_id, days) VALUES (?, ?, ?, ?, ?)')
     .run(newId, year, month, employeeId, JSON.stringify(days));
   res.json({ id: newId });
@@ -530,7 +608,7 @@ app.get('/api/archives', (req, res) => {
 
 app.post('/api/archives', (req, res) => {
   const { id, year, month, employeeId, employeeName, department, position, salary, hoursWorked } = req.body;
-  const newId = id || Math.random().toString(36).substring(7);
+  const newId = id || makeId();
   db.prepare('INSERT INTO archives (id, year, month, employee_id, employee_name, department, position, salary, hours_worked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .run(newId, year, month, employeeId, employeeName, department, position, salary, hoursWorked);
   res.json({ id: newId });
@@ -557,8 +635,11 @@ export async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  app.listen(PORT, HOST, () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    if (!servesLoopbackOnly()) {
+      console.warn(`ВНИМАНИЕ: сервер открыт в сеть (HOST=${HOST}) — данные доступны с других компьютеров.`);
+    }
   });
 }
 
