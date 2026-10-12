@@ -17,7 +17,9 @@ async function start() {
   const server = app.listen(0);
   await new Promise(resolve => server.once('listening', resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const { secret } = addAdmin(env.service.db, 'owner', 'correct horse battery');
+  // With a second factor, so that the three-factor sign-in stays covered:
+  // the account that signs in on a password alone is in admins.test.ts.
+  const { secret } = addAdmin(env.service.db, 'owner', 'correct horse battery', { totp: true })!;
   return { ...env, server, base, secret };
 }
 

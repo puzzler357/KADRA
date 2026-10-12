@@ -10,7 +10,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { DEFAULT_PLANS } from './core/rules.ts';
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS customers (
@@ -141,6 +141,9 @@ CREATE TABLE IF NOT EXISTS admins (
   password_hash   TEXT NOT NULL,
   totp_secret     TEXT NOT NULL,
   totp_last_step  INTEGER NOT NULL DEFAULT 0,
+  -- 1 while the account still has the password a fresh installation hands
+  -- out: such a session may do nothing but replace it (src/auth.ts).
+  must_change_password INTEGER NOT NULL DEFAULT 0,
   created_at      TEXT NOT NULL
 );
 
@@ -161,6 +164,13 @@ export function openDb(file: string): Db {
   db.exec('PRAGMA foreign_keys = ON');
   db.exec('PRAGMA busy_timeout = 5000');
   db.exec(SCHEMA);
+
+  // Schema 1 had no must_change_password. The column is added in place so a
+  // database from before this version keeps the accounts already in it.
+  const adminColumns = db.prepare('PRAGMA table_info(admins)').all() as { name: string }[];
+  if (!adminColumns.some(column => column.name === 'must_change_password')) {
+    db.exec('ALTER TABLE admins ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0');
+  }
 
   // Plans are seeded once and then belong to the owner: a later edit of the
   // defaults in code must not overwrite a changed grace period in production.

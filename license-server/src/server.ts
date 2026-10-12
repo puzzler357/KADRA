@@ -13,6 +13,7 @@
  */
 
 import { createApp } from './app.ts';
+import { BOOTSTRAP_PASSWORD, BOOTSTRAP_USERNAME, ensureBootstrapAdmin } from './auth.ts';
 import { openDb } from './db.ts';
 import { LicenseService } from './service.ts';
 import { loadSigner } from './signer.ts';
@@ -23,8 +24,14 @@ if (!signer) console.warn('[license-server] no signing key: files cannot be issu
 else console.log(`[license-server] signing with kid "${signer.kid}"`);
 
 const service = new LicenseService(db, signer);
-const admins = Number((db.prepare('SELECT count(*) AS n FROM admins').get() as { n: number }).n);
-if (!admins) console.warn('[license-server] no administrator yet: run `npm run admin -- add <name>`');
+
+// A database with nobody in it gets the account a fresh installation starts
+// with. It is announced loudly: until someone signs in with it and sets a
+// password, these two words are all the panel asks for.
+if (ensureBootstrapAdmin(db)) {
+  console.warn(`[license-server] no administrator yet: sign in as "${BOOTSTRAP_USERNAME}" with the password `
+    + `"${BOOTSTRAP_PASSWORD}" - the panel then asks for a new one at once, and nothing else works until it is set`);
+}
 
 const trustProxy = process.env.TRUST_PROXY ?? '1';
 const app = createApp(service, {

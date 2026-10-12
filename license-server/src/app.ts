@@ -13,7 +13,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { RuleError } from './core/rules.ts';
-import { login, logout, sessionUser, SESSION_COOKIE, SESSION_MAX_AGE_MS } from './auth.ts';
+import {
+  changePassword, disableTotp, enableTotp, login, logout, mustChangePassword, newTotpSecret, openSession, otpauthUri,
+  sessionUser, totpEnabled, SESSION_COOKIE, SESSION_MAX_AGE_MS
+} from './auth.ts';
 import { rateLimit } from './rateLimit.ts';
 import { createWebhookSource, handlePaymentWebhook, listWebhookSources, setWebhookSourceStatus } from './payments.ts';
 import type { LicenseService } from './service.ts';
@@ -96,19 +99,23 @@ export function createApp(service: LicenseService, options: AppOptions = {}) {
 
   // ------------------------------------------------------------ sign-in
 
+  const sendSession = (res: Response, token: string) => {
+    res.cookie(SESSION_COOKIE, token, {
+      httpOnly: true, secure, sameSite: 'strict', path: '/', maxAge: SESSION_MAX_AGE_MS
+    });
+  };
+
   app.post('/admin/api/login', rateLimit({ name: 'login', windowMs: 15 * 60_000, max: 10 }), (req, res) => {
     const { username, password, code } = req.body ?? {};
-    const token = login(service.db, String(username ?? ''), String(password ?? ''), String(code ?? ''));
-    if (!token) {
+    const session = login(service.db, String(username ?? ''), String(password ?? ''), String(code ?? ''));
+    if (!session) {
       service.event(`login:${String(username ?? '')}`, 'LOGIN_FAILED', { ip: req.ip }, { severity: 'warning' });
       res.status(401).json({ error: 'LOGIN_FAILED', message: 'Неверное имя, пароль или код' });
       return;
     }
     service.event(`admin:${username}`, 'LOGIN', { ip: req.ip });
-    res.cookie(SESSION_COOKIE, token, {
-      httpOnly: true, secure, sameSite: 'strict', path: '/', maxAge: SESSION_MAX_AGE_MS
-    });
-    res.json({ username });
+    sendSession(res, session.token);
+    res.json({ username, must_change_password: session.mustChangePassword });
   });
 
   // Everything else under /admin/api and the offline endpoints: a session,
@@ -127,8 +134,22 @@ export function createApp(service: LicenseService, options: AppOptions = {}) {
     res.locals.user = user;
     next();
   };
-  app.use('/admin/api', requireAdmin);
-  app.use('/v1/offline', requireAdmin, rateLimit({ name: 'offline', windowMs: 60_000, max: 60 }));
+  /**
+   * While the account still has the password a fresh installation hands out,
+   * its session may do nothing but replace it: that account is a way in, not
+   * a working account. Signing out and asking who you are stay open, so the
+   * panel can show the change-password screen.
+   */
+  const OPEN_WHILE_DEFAULT_PASSWORD = new Set(['/me', '/logout', '/password']);
+  const requireOwnPassword = (req: Request, res: Response, next: NextFunction) => {
+    if (OPEN_WHILE_DEFAULT_PASSWORD.has(req.path) || !mustChangePassword(service.db, String(res.locals.user))) {
+      next();
+      return;
+    }
+    res.status(403).json({ error: 'PASSWORD_CHANGE_REQUIRED', message: 'Сначала смените пароль по умолчанию' });
+  };
+  app.use('/admin/api', requireAdmin, requireOwnPassword);
+  app.use('/v1/offline', requireAdmin, requireOwnPassword, rateLimit({ name: 'offline', windowMs: 60_000, max: 60 }));
 
   const actor = (res: Response) => String(res.locals.actor);
 
@@ -137,7 +158,46 @@ export function createApp(service: LicenseService, options: AppOptions = {}) {
     res.clearCookie(SESSION_COOKIE, { path: '/' });
     return { ok: true };
   });
-  route('get', '/admin/api/me', (_req, res) => ({ username: res.locals.user }));
+  route('get', '/admin/api/me', (_req, res) => ({
+    username: res.locals.user,
+    must_change_password: mustChangePassword(service.db, String(res.locals.user)),
+    totp_enabled: totpEnabled(service.db, String(res.locals.user))
+  }));
+
+  // A change of password or second factor ends every session of the account
+  // (src/auth.ts), so the one who made it is handed a new one in the answer.
+  const user = (res: Response) => String(res.locals.user);
+  const renewSession = (res: Response) => sendSession(res, openSession(service.db, user(res)));
+  // These two take a password from someone who is already signed in, which
+  // would otherwise be an unlimited number of guesses at it.
+  const passwordGuesses = rateLimit({ name: 'password', windowMs: 15 * 60_000, max: 10 });
+
+  route('post', '/admin/api/password', passwordGuesses, (req, res) => {
+    changePassword(service.db, user(res), String(req.body?.password ?? ''), String(req.body?.current ?? ''));
+    service.event(actor(res), 'ADMIN_PASSWORD_CHANGED', { ip: req.ip });
+    renewSession(res);
+  });
+
+  /** A secret to put into an authenticator app. Nothing is stored until a code made from it comes back. */
+  route('post', '/admin/api/totp/new', (_req, res) => {
+    if (totpEnabled(service.db, user(res))) {
+      throw new RuleError('TOTP_ALREADY_ENABLED', 'Второй фактор уже включён', 409);
+    }
+    const secret = newTotpSecret();
+    return { secret, uri: otpauthUri(user(res), secret) };
+  });
+  route('post', '/admin/api/totp/enable', (req, res) => {
+    enableTotp(service.db, user(res), String(req.body?.secret ?? ''), String(req.body?.code ?? ''));
+    service.event(actor(res), 'ADMIN_TOTP_ENABLED', { ip: req.ip });
+    renewSession(res);
+  });
+  route('post', '/admin/api/totp/disable', passwordGuesses, (req, res) => {
+    disableTotp(service.db, user(res), String(req.body?.password ?? ''));
+    // Worth a second look in the journal: sign-in to this account just got weaker.
+    service.event(actor(res), 'ADMIN_TOTP_DISABLED', { ip: req.ip }, { severity: 'warning' });
+    renewSession(res);
+  });
+
   route('get', '/admin/api/plans', () => service.plans());
 
   route('get', '/admin/api/customers', () => service.listCustomers());

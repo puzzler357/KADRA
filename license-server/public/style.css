@@ -55,6 +55,9 @@ main { padding: 20px; max-width: 1200px; margin: 0 auto; display: grid; gap: 16p
 .mono { font-family: ui-monospace, Consolas, monospace; }
 
 label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
+/* The rule above gives a label a display of its own, which would outrank the
+   hidden attribute: the code field on the sign-in form is a hidden label. */
+[hidden] { display: none !important; }
 input, select {
   font: inherit; color: var(--text); background: var(--sunken);
   border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; min-width: 0;

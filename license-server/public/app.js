@@ -5,7 +5,7 @@
  */
 
 const root = document.getElementById('app');
-const state = { view: 'licenses', plans: [], user: null, customerFilter: null };
+const state = { view: 'licenses', plans: [], user: null, mustChange: false, customerFilter: null };
 
 // ------------------------------------------------------------------ helpers
 
@@ -196,35 +196,201 @@ function showKey(license, key) {
 
 // -------------------------------------------------------------------- login
 
+/**
+ * Помнит в этом браузере, что вход здесь идёт с кодом, — чтобы поле кода
+ * стояло на месте сразу. Хранилища может не быть (приватное окно, запрет на
+ * данные сайта): тогда поле просто открывают ссылкой под паролем.
+ */
+const TOTP_HINT = 'kdr-lm-totp';
+function totpHint(value) {
+  try {
+    if (value === undefined) return localStorage.getItem(TOTP_HINT) === '1';
+    if (value) localStorage.setItem(TOTP_HINT, '1');
+    else localStorage.removeItem(TOTP_HINT);
+  } catch {
+    // Без хранилища обходимся: подсказка — удобство, а не часть входа.
+  }
+  return Boolean(value);
+}
+
+const codeInput = (attrs = {}) => h('input', {
+  inputmode: 'numeric', autocomplete: 'one-time-code', pattern: '[0-9]{6}', maxlength: 6,
+  placeholder: '000000', title: 'Шесть цифр из приложения-аутентификатора', ...attrs
+});
+
 function loginView() {
-  const username = h('input', { autocomplete: 'username', required: true, placeholder: 'owner', spellcheck: 'false' });
+  const username = h('input', { autocomplete: 'username', required: true, placeholder: 'admin', spellcheck: 'false' });
   const password = passwordField({ autocomplete: 'current-password', required: true });
-  // The field wants the six digits the authenticator shows, not the secret
-  // that was put into it once - a distinction worth spelling out, because
-  // the browser only says "use the required format".
-  const code = h('input', {
-    inputmode: 'numeric', autocomplete: 'one-time-code', pattern: '[0-9]{6}', maxlength: 6,
-    required: true, placeholder: '000000', title: 'Шесть цифр из приложения-аутентификатора'
-  });
+  // Второй фактор включают не все, поэтому поле кода открывается ссылкой, а
+  // не стоит пустым перед каждым. Сервер при этом не подсказывает, нужен ли
+  // код: на любой промах ответ один и тот же.
+  const code = codeInput();
+  const expectsCode = totpHint();
+  const codeLabel = h('label', { hidden: !expectsCode }, 'Одноразовый код', code,
+    h('span', { class: 'muted' }, 'Шесть цифр из приложения-аутентификатора; меняются каждые 30 секунд'));
+  const reveal = h('button', {
+    type: 'button', class: 'link', hidden: expectsCode,
+    onclick: () => {
+      codeLabel.hidden = false;
+      reveal.hidden = true;
+      code.focus();
+    }
+  }, 'У меня включён второй фактор');
   const form = h('form', {
     class: 'card login',
     onsubmit: async event => {
       event.preventDefault();
+      const typedCode = codeLabel.hidden ? '' : code.value;
       const result = await act(() => api('POST', '/admin/api/login',
-        { username: username.value, password: password.input.value, code: code.value }));
+        { username: username.value, password: password.input.value, code: typedCode }));
       if (result) {
+        totpHint(typedCode !== '');
         state.user = result.username;
-        await start();
+        state.mustChange = Boolean(result.must_change_password);
+        if (state.mustChange) render();
+        else await start();
       }
     }
   },
   h('h1', {}, 'KADRA License Manager'),
   h('label', {}, 'Имя администратора', username),
   h('label', {}, 'Пароль', password.field),
-  h('label', {}, 'Одноразовый код', code,
-    h('span', { class: 'muted' }, 'Шесть цифр из приложения-аутентификатора; меняются каждые 30 секунд')),
-  h('button', { class: 'primary' }, 'Войти'));
+  codeLabel,
+  h('button', { class: 'primary' }, 'Войти'),
+  reveal);
   return form;
+}
+
+/**
+ * Первый вход на новой установке: пока пароль по умолчанию не заменён, панель
+ * не делает больше ничего — сервер отвечает PASSWORD_CHANGE_REQUIRED на любой
+ * другой запрос. Сменив пароль, человек остаётся в панели: сервер выдаёт
+ * новую сессию взамен тех, что закрылись вместе со старым паролем.
+ */
+function passwordChangeView() {
+  const password = passwordField({ autocomplete: 'new-password', required: true, minlength: 12 });
+  const again = passwordField({ autocomplete: 'new-password', required: true, minlength: 12 });
+  const form = h('form', {
+    class: 'card login',
+    onsubmit: async event => {
+      event.preventDefault();
+      if (password.input.value !== again.input.value) {
+        toast('Пароли не совпадают', 'error');
+        return;
+      }
+      const done = await act(() => api('POST', '/admin/api/password', { password: password.input.value }), 'Пароль изменён');
+      if (done) {
+        state.mustChange = false;
+        await start();
+      }
+    }
+  },
+  h('h1', {}, 'Смените пароль'),
+  h('div', { class: 'notice bad' }, 'У этой учётной записи пароль по умолчанию. '
+    + 'Пока он не заменён, панель не выпускает лицензии и не показывает клиентов.'),
+  h('label', {}, 'Новый пароль', password.field,
+    h('span', { class: 'muted' }, 'Не короче 12 символов')),
+  h('label', {}, 'Ещё раз', again.field),
+  h('button', { class: 'primary' }, 'Сохранить'));
+  return form;
+}
+
+// ------------------------------------------------------------------ account
+
+/**
+ * Второй фактор включается в два шага: сначала секрет попадает в приложение
+ * на телефоне, потом код из этого приложения возвращается сюда. До второго
+ * шага на сервере ничего не меняется — секрет, который так и не добрался до
+ * телефона, не должен стать тем, без чего не войти.
+ */
+async function enableSecondFactor() {
+  const fresh = await act(() => api('POST', '/admin/api/totp/new'));
+  if (!fresh) return;
+  const code = codeInput({ required: true });
+  // Сообщение об ошибке — внутри окна: всплывающая строка осталась бы под ним.
+  const problem = h('div', { class: 'notice bad', hidden: true });
+  const dialog = h('dialog', {},
+    h('form', {
+      onsubmit: async event => {
+        event.preventDefault();
+        try {
+          await api('POST', '/admin/api/totp/enable', { secret: fresh.secret, code: code.value });
+        } catch (error) {
+          problem.textContent = error.message;
+          problem.hidden = false;
+          code.select();
+          return;
+        }
+        totpHint(true);
+        dialog.close();
+        toast('Второй фактор включён');
+        render();
+      }
+    },
+    h('h2', {}, 'Включить второй фактор'),
+    h('p', {}, '1. В приложении-аутентификаторе (Google Authenticator, Aegis) выберите «Добавить вручную», '
+      + 'введите этот секрет и тип «по времени».'),
+    h('div', { class: 'keybox mono' }, fresh.secret),
+    h('p', { class: 'muted' }, 'Или ссылкой: ', h('span', { class: 'mono' }, fresh.uri)),
+    h('label', {}, '2. Введите шесть цифр, которые теперь показывает приложение', code),
+    problem,
+    h('p', { class: 'muted' }, 'Пока код не подтверждён, ничего не меняется: вход остаётся по паролю.'),
+    h('div', { class: 'row' },
+      h('span', { class: 'grow' }),
+      h('button', { type: 'button', onclick: () => dialog.close() }, 'Отмена'),
+      h('button', { class: 'primary' }, 'Подтвердить'))));
+  dialog.addEventListener('close', () => dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
+}
+
+async function disableSecondFactor() {
+  const values = await ask('Выключить второй фактор', [
+    { note: 'После этого для входа хватит одного пароля. Чтобы подтвердить, введите его.' },
+    { name: 'password', label: 'Пароль', type: 'password', required: true }
+  ], 'Выключить', true);
+  if (!values) return;
+  const done = await act(() => api('POST', '/admin/api/totp/disable', { password: values.password }), 'Второй фактор выключен');
+  if (done) {
+    totpHint(false);
+    render();
+  }
+}
+
+async function changeOwnPassword() {
+  const values = await ask('Сменить пароль', [
+    { name: 'current', label: 'Текущий пароль', type: 'password', required: true },
+    { name: 'password', label: 'Новый пароль (не короче 12 символов)', type: 'password', required: true },
+    { name: 'again', label: 'Новый пароль ещё раз', type: 'password', required: true }
+  ]);
+  if (!values) return;
+  if (values.password !== values.again) {
+    toast('Пароли не совпадают', 'error');
+    return;
+  }
+  await act(() => api('POST', '/admin/api/password', { current: values.current, password: values.password }), 'Пароль изменён');
+}
+
+async function accountView() {
+  const me = await api('GET', '/admin/api/me');
+  return [
+    h('section', { class: 'card' },
+      h('div', { class: 'row' },
+        h('h2', { class: 'grow' }, 'Второй фактор'),
+        me.totp_enabled
+          ? h('button', { class: 'danger', onclick: disableSecondFactor }, 'Выключить')
+          : h('button', { class: 'primary', onclick: enableSecondFactor }, 'Включить')),
+      me.totp_enabled
+        ? h('p', {}, 'Включён: при входе, кроме пароля, нужны шесть цифр из приложения-аутентификатора.')
+        : h('p', {}, 'Выключен: вход по имени и паролю. Со вторым фактором к паролю добавляется код из '
+          + 'приложения на телефоне, и подсмотренный или подобранный пароль сам по себе панель не откроет. '
+          + 'Стоит включить, когда сервер доступен из интернета.')),
+    h('section', { class: 'card' },
+      h('div', { class: 'row' },
+        h('h2', { class: 'grow' }, 'Пароль'),
+        h('button', { onclick: changeOwnPassword }, 'Сменить пароль')),
+      h('p', { class: 'muted' }, `Учётная запись: ${me.username}`))
+  ];
 }
 
 // ---------------------------------------------------------------- customers
@@ -669,6 +835,7 @@ const VIEWS = {
   offline: ['Офлайн-файлы', offlineView],
   payments: ['Платежи', paymentsView],
   events: ['События', eventsView],
+  account: ['Учётная запись', accountView],
   license: [null, licenseView]
 };
 
@@ -680,6 +847,10 @@ function go(view) {
 async function render() {
   if (!state.user) {
     root.replaceChildren(loginView());
+    return;
+  }
+  if (state.mustChange) {
+    root.replaceChildren(passwordChangeView());
     return;
   }
   const main = h('main', {}, h('p', { class: 'muted' }, 'Загрузка…'));
@@ -710,5 +881,9 @@ async function start() {
 }
 
 api('GET', '/admin/api/me')
-  .then(me => { state.user = me.username; return start(); })
+  .then(me => {
+    state.user = me.username;
+    state.mustChange = Boolean(me.must_change_password);
+    return state.mustChange ? render() : start();
+  })
   .catch(() => render());
