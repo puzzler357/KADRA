@@ -400,7 +400,7 @@
 
 ## С-17. Лицензирование (только десктоп)
 
-Проверяется на `npm run tauri:dev` (отладочная сборка принимает файлы, подписанные dev-ключом). Рядом — сервер лицензий: `cd license-server`, `npm install` один раз, `npm run admin:dev -- add owner` один раз, затем `npm run dev`; панель — `http://127.0.0.1:8787/admin/`. Правила — `LICENSING.md`, сторона продавца — `license-server/SellerManual.md`.
+Проверяется на `npm run tauri:dev` (отладочная сборка принимает файлы, подписанные dev-ключом). Рядом — сервер лицензий: `cd license-server`, `npm install` один раз, затем `npm run dev`; панель — `http://127.0.0.1:8787/admin/`, первый вход `admin` / `1234` (сразу попросит новый пароль). Правила — `LICENSING.md`, сторона продавца — `license-server/SellerManual.md`.
 
 | № | Действие | Ожидаемо | Знак | Отм. |
 |---|---|---|---|---|
