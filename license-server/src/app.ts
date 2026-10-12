@@ -1,7 +1,7 @@
 /**
  * HTTP surface of the licence server (5.2, 10.2).
  *
- * /v1/activate, /v1/refresh,   the KADRA client, authenticated by device signature
+ * /v1/activate, /v1/refresh,   the KADRA and SALDO clients, authenticated by device signature
  * /v1/rebind, /v1/deactivate
  * /v1/payments/<source>        payment webhooks, signed with the source's secret
  * /v1/offline/*                offline request files, License Manager only
@@ -19,6 +19,7 @@ import {
 } from './auth.ts';
 import { rateLimit } from './rateLimit.ts';
 import { createWebhookSource, handlePaymentWebhook, listWebhookSources, setWebhookSourceStatus } from './payments.ts';
+import { productOfFilename } from './products.ts';
 import type { LicenseService } from './service.ts';
 
 const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../public');
@@ -76,10 +77,11 @@ export function createApp(service: LicenseService, options: AppOptions = {}) {
   app.get('/', (_req, res) => res.redirect('/admin/'));
   app.use('/admin', express.static(PUBLIC_DIR, { index: 'index.html', maxAge: 0 }));
 
-  // ------------------------------------------------- the KADRA client (5.2)
+  // ------------------------------------------- the KADRA and SALDO clients (5.2)
 
-  // Signed requests from KADRA itself: no session, the device signature is the
-  // credential. Answers other than a signed file or status change nothing on
+  // Signed requests from the applications themselves: no session, the device
+  // signature is the credential. Both speak the same protocol; which one a
+  // request is for follows from the licence it names (src/products.ts). Answers other than a signed file or status change nothing on
   // the client, so errors here are plain JSON.
   route('post', '/v1/activate', rateLimit({ name: 'activate', windowMs: 60 * 60_000, max: 20 }),
     req => service.activateOnline(req.body));
@@ -95,7 +97,7 @@ export function createApp(service: LicenseService, options: AppOptions = {}) {
   // Signed by the sender's own secret (src/payments.ts has the contract).
   route('post', '/v1/payments/:source', rateLimit({ name: 'payments', windowMs: 60_000, max: 120 }),
     req => handlePaymentWebhook(service, String(req.params.source),
-      (req as Request & { rawBody?: Buffer }).rawBody, req.get('X-KDR-Signature')));
+      (req as Request & { rawBody?: Buffer }).rawBody, req.get('X-KDR-Signature') ?? req.get('X-SALDO-Signature')));
 
   // ------------------------------------------------------------ sign-in
 
@@ -199,13 +201,16 @@ export function createApp(service: LicenseService, options: AppOptions = {}) {
   });
 
   route('get', '/admin/api/plans', () => service.plans());
+  route('get', '/admin/api/products', () => service.products());
 
   route('get', '/admin/api/customers', () => service.listCustomers());
   route('post', '/admin/api/customers', (req, res) => service.createCustomer(req.body ?? {}, actor(res)));
   route('patch', '/admin/api/customers/:id', (req, res) => service.updateCustomer(String(req.params.id), req.body ?? {}, actor(res)));
 
-  route('get', '/admin/api/licenses', req =>
-    service.listLicenses({ customer_id: typeof req.query.customer_id === 'string' ? req.query.customer_id : undefined }));
+  route('get', '/admin/api/licenses', req => service.listLicenses({
+    customer_id: typeof req.query.customer_id === 'string' ? req.query.customer_id : undefined,
+    product: typeof req.query.product === 'string' && req.query.product ? req.query.product : undefined
+  }));
   route('post', '/admin/api/licenses', (req, res) => service.createLicense(req.body ?? {}, actor(res)));
   route('get', '/admin/api/licenses/:id', req => service.licenseDetails(String(req.params.id)));
   route('post', '/admin/api/licenses/:id/renew', (req, res) => service.renewLicense(String(req.params.id), req.body ?? {}, actor(res)));
@@ -237,9 +242,14 @@ export function createApp(service: LicenseService, options: AppOptions = {}) {
 
   // ------------------------------------------------------ offline files (5.1)
 
-  /** What a .kdrreq / .kdrdeact asks for; changes nothing. */
+  // The panel sends the file's name along: its extension says which
+  // application made the request, and a licence of the other one is refused.
+  const fileProduct = (req: Request) => productOfFilename(req.body?.filename);
+
+  /** What a .kdrreq / .kdrdeact / .saldoreq / .saldodeact asks for; changes nothing. */
   route('post', '/v1/offline/inspect', (req, res) => service.inspectRequest(req.body?.request, {
     actor: actor(res),
+    product: fileProduct(req),
     transferFrom: req.body?.transfer_from || undefined,
     overrideTransferLimit: Boolean(req.body?.override_transfer_limit),
     approveTransfer: Boolean(req.body?.approve_transfer)
@@ -248,6 +258,7 @@ export function createApp(service: LicenseService, options: AppOptions = {}) {
   /** 5.2: applies it and returns the signed file, if the request produces one. */
   route('post', '/v1/offline/process', (req, res) => service.processRequest(req.body?.request, {
     actor: actor(res),
+    product: fileProduct(req),
     transferFrom: req.body?.transfer_from || undefined,
     overrideTransferLimit: Boolean(req.body?.override_transfer_limit),
     approveTransfer: Boolean(req.body?.approve_transfer)

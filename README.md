@@ -189,7 +189,7 @@ cargo test --lib                    # 75 тестов: приёмочные пр
 cargo test --lib -- --ignored e2e   # сквозные: против утилиты kdr-license и настоящего сервера (нужен Node 22.18+)
 ```
 
-Сервер лицензий — `npm test` в `license-server` (69 тестов).
+Сервер лицензий (KADRA и SALDO) — `npm test` в `license-server` (87 тестов).
 
 ## Документация
 

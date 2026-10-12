@@ -18,7 +18,9 @@ import {
   type ActivationMode, type Fingerprint, type PlanCode, type PlanParams
 } from './core/rules.ts';
 import { seal, sha256, verifyRequest, type RequestPayload, type Signer } from './core/envelope.ts';
-import { generateLicenseKey, hashLicenseKey, normalizeLicenseKey } from './core/licenseKey.ts';
+import { generateLicenseKey, hashLicenseKey, licenseKeyCandidates } from './core/licenseKey.ts';
+import { DEFAULT_PRODUCT, PRODUCT_CODES, product as productOf, type ProductCode } from './products.ts';
+import type { Signers } from './signer.ts';
 
 export interface Clock {
   now(): Date;
@@ -38,6 +40,8 @@ export interface CustomerRow {
 
 export interface LicenseRow {
   id: string;
+  /** KADRA or SALDO: whose files this licence produces (src/products.ts). */
+  product: ProductCode;
   customer_id: string;
   plan: PlanCode;
   activation_mode: ActivationMode;
@@ -107,6 +111,12 @@ export interface Decision {
 
 export interface ProcessOptions {
   actor: string;
+  /**
+   * The application the request file came from, when that is known (its
+   * extension: .kdrreq, .saldoreq). A licence of the other application is
+   * then refused instead of answered with a file the client cannot use.
+   */
+  product?: ProductCode | null;
   /** The seller approves a transfer (7.2: a broken old computer). */
   approveTransfer?: boolean;
   /** For ACTIVATE with full seats: the activation the new device replaces. */
@@ -143,13 +153,25 @@ const REBINDS_PER_MONTH = 3;
 
 export class LicenseService {
   readonly db: Db;
-  private readonly signer: Signer | null;
+  private readonly signers: Signers;
   private readonly clock: Clock;
 
-  constructor(db: Db, signer: Signer | null, clock: Clock = systemClock) {
+  /**
+   * `signers`: a key per application. A single key on its own is KADRA's -
+   * the console utility and the tests from before SALDO pass one that way.
+   */
+  constructor(db: Db, signers: Signer | Signers | null, clock: Clock = systemClock) {
     this.db = db;
-    this.signer = signer;
+    this.signers = !signers ? {} : 'key' in signers && 'kid' in signers ? { KADRA: signers as Signer } : signers as Signers;
     this.clock = clock;
+  }
+
+  /** Which applications' files can be issued now, and with which key. */
+  products(): { code: ProductCode; prefix: string; ext: ReturnType<typeof productOf>['ext']; kid: string | null }[] {
+    return PRODUCT_CODES.map(code => {
+      const p = productOf(code);
+      return { code, prefix: p.prefix, ext: p.ext, kid: this.signers[code]?.kid ?? null };
+    });
   }
 
   // ---------------------------------------------------------------- journal
@@ -243,12 +265,14 @@ export class LicenseService {
     customer_id: string;
     plan: string;
     activation_mode: ActivationMode;
+    product?: ProductCode;
     seats?: number;
     edition?: string;
     features?: string[];
     max_version?: string | null;
     start?: string;
   }, actor: string): { license: LicenseRow; license_key: string } {
+    const product = productOf(input.product || DEFAULT_PRODUCT);
     const customer = this.customer(input.customer_id);
     const plan = this.plan(input.plan);
     assertSellable(plan, input.activation_mode);
@@ -261,22 +285,30 @@ export class LicenseService {
     const paidUntil = plan.term_months === null ? null : iso(endOfDay(addMonths(start, plan.term_months)));
 
     return inTransaction(this.db, () => {
-      const id = `KDR-${now.getUTCFullYear()}-${String(nextValue(this.db, `license-${now.getUTCFullYear()}`)).padStart(6, '0')}`;
-      const licenseKey = generateLicenseKey();
-      this.db.prepare(`INSERT INTO licenses (id, key_hash, customer_id, plan, activation_mode, seats, edition,
-        features, paid_until, grace_days, max_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(id, hashLicenseKey(licenseKey), customer.id, plan.code, input.activation_mode, seats,
+      // Each application numbers its licences on its own. KADRA keeps the
+      // sequence it has always used, so its numbering simply continues.
+      const year = now.getUTCFullYear();
+      const sequence = product.code === 'KADRA' ? `license-${year}` : `license-${product.code}-${year}`;
+      const id = `${product.prefix}-${year}-${String(nextValue(this.db, sequence)).padStart(6, '0')}`;
+      const licenseKey = generateLicenseKey(product.code);
+      this.db.prepare(`INSERT INTO licenses (id, product, key_hash, customer_id, plan, activation_mode, seats, edition,
+        features, paid_until, grace_days, max_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(id, product.code, hashLicenseKey(licenseKey), customer.id, plan.code, input.activation_mode, seats,
           input.edition?.trim() || 'PRO', JSON.stringify(input.features ?? []), paidUntil, plan.grace_days,
           input.max_version?.trim() || null, iso(now));
-      this.event(actor, 'LICENSE_CREATED', { plan: plan.code, mode: input.activation_mode, seats, paid_until: paidUntil },
+      this.event(actor, 'LICENSE_CREATED',
+        { product: product.code, plan: plan.code, mode: input.activation_mode, seats, paid_until: paidUntil },
         { license_id: id });
       return { license: this.license(id), license_key: licenseKey };
     });
   }
 
-  listLicenses(filter: { customer_id?: string } = {}) {
-    const where = filter.customer_id ? 'WHERE l.customer_id = ?' : '';
-    const args = filter.customer_id ? [filter.customer_id] : [];
+  listLicenses(filter: { customer_id?: string; product?: string } = {}) {
+    const clauses: string[] = [];
+    const args: string[] = [];
+    if (filter.customer_id) { clauses.push('l.customer_id = ?'); args.push(filter.customer_id); }
+    if (filter.product) { clauses.push('l.product = ?'); args.push(productOf(filter.product).code); }
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
     return this.db.prepare(`SELECT l.*, c.name AS customer_name,
         (SELECT count(*) FROM activations a WHERE a.license_id = l.id AND a.${LIVE}) AS seats_used
       FROM licenses l JOIN customers c ON c.id = l.customer_id ${where}
@@ -383,9 +415,10 @@ export class LicenseService {
     return this.activation(id);
   }
 
-  private requireSigner(): Signer {
-    if (!this.signer) throw new RuleError('NO_SIGNING_KEY', 'Ключ подписи не загружен: выпуск файлов невозможен', 503);
-    return this.signer;
+  private requireSigner(code: ProductCode): Signer {
+    const signer = this.signers[code];
+    if (!signer) throw new RuleError('NO_SIGNING_KEY', `Ключ подписи ${code} не загружен: выпуск файлов ${code} невозможен`, 503);
+    return signer;
   }
 
   private record(file: IssuedFile, payload: { issued_at: string; paid_until?: string | null; lease_until?: string | null }) {
@@ -398,11 +431,12 @@ export class LicenseService {
 
   /** A licence file (3.2) for one activation at the next revision. */
   issueLicenseFile(activationId: string, actor: string, kind = 'REISSUE'): IssuedFile {
-    const signer = this.requireSigner();
     const activation = this.activation(activationId);
     if (activation.status === 'RELEASED') throw new RuleError('ACTIVATION_RELEASED', 'Место освобождено; файл не выпускается');
     const license = this.license(activation.license_id);
     if (license.status === 'REVOKED') throw new RuleError('LICENSE_REVOKED', 'Лицензия отозвана');
+    const product = productOf(license.product);
+    const signer = this.requireSigner(product.code);
     const plan = this.plan(license.plan);
     const now = this.clock.now();
     const revision = Number(activation.current_revision) + 1;
@@ -415,7 +449,7 @@ export class LicenseService {
       revision,
       customer_id: license.customer_id,
       customer_name: this.customer(license.customer_id).name,
-      product: 'KADRA',
+      product: product.code,
       edition: license.edition,
       features: JSON.parse(license.features) as string[],
       plan: license.plan,
@@ -438,7 +472,7 @@ export class LicenseService {
     assertLeaseInvariant(payload);
 
     const file: IssuedFile = {
-      filename: `${license.id}_${activation.id}_r${revision}.kdrlic`,
+      filename: `${license.id}_${activation.id}_r${revision}.${product.ext.license}`,
       content: JSON.stringify(seal(signer, payload), null, 2) + '\n',
       kind,
       license_id: license.id,
@@ -456,8 +490,9 @@ export class LicenseService {
    * consumes a revision, so the client accepts each one once.
    */
   issueClockReset(activationId: string, highWaterTo: string | null, actor: string): IssuedFile {
-    const signer = this.requireSigner();
     const activation = this.activation(activationId);
+    const product = productOf(this.license(activation.license_id).product);
+    const signer = this.requireSigner(product.code);
     const now = this.clock.now();
     const target = highWaterTo ? new Date(highWaterTo) : now;
     if (Number.isNaN(target.getTime())) throw new RuleError('VALIDATION', 'Неверная дата');
@@ -474,7 +509,7 @@ export class LicenseService {
     };
     return inTransaction(this.db, () => {
       const file: IssuedFile = {
-        filename: `${activation.license_id}_${activation.id}_r${revision}.kdrclock`,
+        filename: `${activation.license_id}_${activation.id}_r${revision}.${product.ext.clock}`,
         content: JSON.stringify(seal(signer, status), null, 2) + '\n',
         kind: 'CLOCK_RESET',
         license_id: activation.license_id,
@@ -535,9 +570,12 @@ export class LicenseService {
     let license: LicenseRow | undefined;
     let activation: ActivationRow | undefined;
     if (request.type === 'ACTIVATE') {
-      const key = request.license_key ? normalizeLicenseKey(request.license_key) : null;
-      if (!key) return block('INVALID_KEY', 'Ключ лицензии в запросе написан с ошибкой');
-      license = this.db.prepare('SELECT * FROM licenses WHERE key_hash = ?').get(hashLicenseKey(key)) as LicenseRow | undefined;
+      const candidates = request.license_key ? licenseKeyCandidates(request.license_key) : [];
+      if (!candidates.length) return block('INVALID_KEY', 'Ключ лицензии в запросе написан с ошибкой');
+      for (const { key } of candidates) {
+        license = this.db.prepare('SELECT * FROM licenses WHERE key_hash = ?').get(hashLicenseKey(key)) as LicenseRow | undefined;
+        if (license) break;
+      }
       if (!license) return block('INVALID_KEY', 'Лицензии с таким ключом нет');
     } else {
       activation = this.db.prepare('SELECT * FROM activations WHERE id = ? AND license_id = ?')
@@ -550,6 +588,10 @@ export class LicenseService {
     const plan = this.plan(license.plan);
     const live = this.liveActivations(license.id);
     decision.license = { ...license, customer_name: this.customer(license.customer_id).name };
+    if (options.product && license.product !== options.product) {
+      return block('WRONG_PRODUCT',
+        `Это файл ${options.product}, а лицензия ${license.id} выдана на ${license.product}: файл для другого приложения клиенту не подойдёт`);
+    }
     decision.seats = { used: live.length, total: Number(license.seats) };
     decision.transfers = { last_year: this.transfersLastYear(license.id), limit: plan.max_transfers_per_year };
     const overLimit = decision.transfers.last_year >= decision.transfers.limit && !options.overrideTransferLimit;
@@ -815,7 +857,7 @@ export class LicenseService {
 
   /** A signed REVOKED / TRANSFERRED (3.4), consuming the next revision. */
   private signedStatus(activation: ActivationRow, kind: 'REVOKED' | 'TRANSFERRED', nonce: string): object {
-    const signer = this.requireSigner();
+    const signer = this.requireSigner(this.license(activation.license_id).product);
     const revision = Number(activation.current_revision) + 1;
     const status = {
       v: 1,
@@ -838,7 +880,7 @@ export class LicenseService {
 
   /** Recent payments of every licence, newest first (the "Платежи" tab). */
   listPayments(limit = 200) {
-    return this.db.prepare(`SELECT p.*, l.customer_id, c.name AS customer_name, l.activation_mode, l.plan
+    return this.db.prepare(`SELECT p.*, l.customer_id, c.name AS customer_name, l.activation_mode, l.plan, l.product
       FROM payments p JOIN licenses l ON l.id = p.license_id JOIN customers c ON c.id = l.customer_id
       ORDER BY p.id DESC LIMIT ?`).all(Math.min(Math.max(limit, 1), 1000));
   }
@@ -860,7 +902,7 @@ export class LicenseService {
     const since = iso(new Date(this.clock.now().getTime() - 90 * 86_400_000));
     return {
       fork_suspected: this.db.prepare("SELECT * FROM activations WHERE status = 'FORK_SUSPECTED'").all(),
-      heavy_transfers: this.db.prepare(`SELECT l.id AS license_id, c.name AS customer_name, count(t.id) AS transfers,
+      heavy_transfers: this.db.prepare(`SELECT l.id AS license_id, l.product, c.name AS customer_name, count(t.id) AS transfers,
           p.max_transfers_per_year AS limit_per_year
         FROM transfers t JOIN licenses l ON l.id = t.license_id JOIN customers c ON c.id = l.customer_id
         JOIN plans p ON p.code = l.plan

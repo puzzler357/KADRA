@@ -46,6 +46,23 @@ header {
 header nav { display: flex; gap: 4px; flex: 1; flex-wrap: wrap; }
 header nav button { background: none; border: none; color: var(--muted); }
 header nav button.active { background: var(--sunken); color: var(--text); }
+h1 .subtitle { margin-left: 8px; font-size: 13px; font-weight: 400; }
+label .hint { font-size: 12px; line-height: 1.4; }
+.card > .notice:first-child { margin-bottom: 12px; }
+
+/* Which application a licence is for. Text, not just colour, carries it. */
+.product {
+  display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 11px; font-weight: 600;
+  letter-spacing: .03em; border: 1px solid currentColor; vertical-align: middle;
+}
+.product.KADRA { color: var(--accent); }
+.product.SALDO { color: var(--ok); }
+
+/* A row of buttons where one is chosen: the application filter. */
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: none; border-radius: 0; background: none; color: var(--muted); }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button.active { background: var(--sunken); color: var(--text); }
 
 main { padding: 20px; max-width: 1200px; margin: 0 auto; display: grid; gap: 16px; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; overflow-x: auto; }

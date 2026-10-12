@@ -1,11 +1,15 @@
 /**
- * License Manager (LICENSING.md 10.2). Plain DOM, no build step.
+ * License Manager (LICENSING.md 10.2) for KADRA and SALDO. Plain DOM, no build step.
  * Everything from the server is inserted as text, never as HTML: customer and
  * device names are typed by other people.
  */
 
 const root = document.getElementById('app');
-const state = { view: 'licenses', plans: [], user: null, mustChange: false, customerFilter: null };
+const state = {
+  view: 'licenses', plans: [], products: [], user: null, mustChange: false, customerFilter: null, productFilter: '',
+  // The page is newer than the server process: it was not restarted after the update.
+  serverOutdated: false
+};
 
 // ------------------------------------------------------------------ helpers
 
@@ -133,6 +137,24 @@ function download(file) {
 const date = value => (value ? new Date(value).toLocaleDateString('ru-RU') : '—');
 const dateTime = value => (value ? new Date(value).toLocaleString('ru-RU') : '—');
 const badge = value => h('span', { class: `badge ${value}` }, value);
+/** Which application a licence is for: KADRA and SALDO look alike everywhere else. */
+const productTag = code => h('span', { class: `product ${code}` }, code);
+const productInfo = code => state.products.find(p => p.code === code);
+/** What each application is, for the choice in the new-licence form. */
+const PRODUCT_LABEL = {
+  KADRA: 'KADRA — кадры и отдел кадров (ключ KDR-…)',
+  SALDO: 'SALDO — бухгалтерия (ключ SALDO-…)'
+};
+/**
+ * The applications as the panel knows them, for when the server cannot say:
+ * enough to read and show files, never to issue them (no key information).
+ */
+const KNOWN_PRODUCTS = [
+  { code: 'KADRA', prefix: 'KDR', ext: { license: 'kdrlic', clock: 'kdrclock', request: 'kdrreq', deactivate: 'kdrdeact' }, kid: null },
+  { code: 'SALDO', prefix: 'SALDO', ext: { license: 'saldolic', clock: 'saldoclock', request: 'saldoreq', deactivate: 'saldodeact' }, kid: null }
+];
+/** Request and deactivation files of every application, for the file picker. */
+const requestExtensions = () => state.products.flatMap(p => [`.${p.ext.request}`, `.${p.ext.deactivate}`]);
 const PLAN = { PERPETUAL: 'Бессрочная', ANNUAL: 'Годовая', QUARTERLY: 'Квартальная', MONTHLY: 'Месячная' };
 const MODE = { ONLINE: 'онлайн', OFFLINE: 'офлайн' };
 /** Payment sources entered by hand; a webhook's own source is shown as is. */
@@ -158,12 +180,16 @@ function ask(title, fields, confirmLabel = 'Сохранить', danger = false)
         fields.map(field => {
           if (field.note) return h('p', { class: 'muted' }, field.note);
           const input = field.options
-            ? h('select', { name: field.name }, field.options.map(([value, label]) =>
-                h('option', { value, selected: value === field.value }, label)))
+            ? h('select', { name: field.name, required: field.required },
+                // A select with a placeholder starts on it, so nothing is chosen
+                // for the user: the form will not send until they pick.
+                field.placeholder && h('option', { value: '', disabled: true, selected: !field.value }, field.placeholder),
+                field.options.map(([value, label]) =>
+                  h('option', { value, selected: value === field.value }, label)))
             : h('input', { name: field.name, type: field.type ?? 'text', value: field.value ?? '', required: field.required,
                 min: field.min, placeholder: field.placeholder });
           inputs[field.name] = input;
-          return h('label', {}, field.label, input);
+          return h('label', {}, field.label, input, field.hint && h('span', { class: 'muted hint' }, field.hint));
         }),
         h('div', { class: 'row' },
           h('span', { class: 'grow' }),
@@ -182,8 +208,8 @@ function ask(title, fields, confirmLabel = 'Сохранить', danger = false)
 function showKey(license, key) {
   const dialog = h('dialog', {},
     h('form', { method: 'dialog' },
-      h('h2', {}, `Лицензия ${license.id} создана`),
-      h('p', {}, 'Ключ лицензии показывается один раз: на сервере хранится только его хэш. Сохраните его и передайте клиенту.'),
+      h('h2', {}, `Лицензия ${license.product} ${license.id} создана`),
+      h('p', {}, `Ключ лицензии показывается один раз: на сервере хранится только его хэш. Сохраните его и передайте клиенту — он вводится в ${license.product}.`),
       h('div', { class: 'keybox mono' }, key),
       h('div', { class: 'row' },
         h('button', { type: 'button', onclick: () => act(() => navigator.clipboard.writeText(key), 'Ключ скопирован') }, 'Копировать'),
@@ -252,7 +278,7 @@ function loginView() {
       }
     }
   },
-  h('h1', {}, 'KADRA License Manager'),
+  h('h1', {}, 'License Manager', h('span', { class: 'muted subtitle' }, 'KADRA · SALDO')),
   h('label', {}, 'Имя администратора', username),
   h('label', {}, 'Пароль', password.field),
   codeLabel,
@@ -435,18 +461,27 @@ async function customersView() {
 
 async function licensesView() {
   const filter = state.customerFilter;
-  const licenses = await api('GET', `/admin/api/licenses${filter ? `?customer_id=${encodeURIComponent(filter.id)}` : ''}`);
+  const query = new URLSearchParams();
+  if (filter) query.set('customer_id', filter.id);
+  if (state.productFilter) query.set('product', state.productFilter);
+  const licenses = await api('GET', `/admin/api/licenses${String(query) ? `?${query}` : ''}`);
 
   const create = async () => {
+    if (state.serverOutdated) return toast('Сначала перезапустите сервер лицензий — см. сообщение вверху', 'error');
     const customers = (await api('GET', '/admin/api/customers')).filter(c => c.status === 'ACTIVE');
     if (!customers.length) return toast('Сначала создайте клиента', 'error');
     const values = await ask('Новая лицензия', [
+      { name: 'product', label: 'Приложение', value: state.productFilter, required: true,
+        placeholder: 'Выберите приложение: KADRA или SALDO',
+        options: state.products.map(p => [p.code,
+          `${PRODUCT_LABEL[p.code] ?? p.code}${p.kid ? '' : ' — ключ подписи не загружен, файлы не выпустить'}`]),
+        hint: 'На что покупают лицензию. Ключ и файлы подойдут только к этому приложению; изменить потом нельзя.' },
       { name: 'customer_id', label: 'Клиент', value: filter?.id, options: customers.map(c => [c.id, `${c.name} (${c.id})`]) },
       { name: 'plan', label: 'Тариф', options: state.plans.map(p => [p.code, `${PLAN[p.code] ?? p.code} — ${p.allowed_modes.map(m => MODE[m]).join(', ')}`]) },
       { name: 'activation_mode', label: 'Режим', options: [['OFFLINE', 'Офлайн (обмен файлами)'], ['ONLINE', 'Онлайн']] },
       { name: 'seats', label: 'Мест (компьютеров)', type: 'number', value: 1, min: 1 },
       { name: 'start', label: 'Начало оплаченного периода', type: 'date', value: new Date().toISOString().slice(0, 10) },
-      { name: 'max_version', label: 'Версии KADRA до (пусто — все)', value: '1.99.99' },
+      { name: 'max_version', label: 'Версии приложения до (пусто — все)', value: '1.99.99' },
       { name: 'edition', label: 'Редакция', value: 'PRO' },
       { name: 'features', label: 'Модули через запятую (необязательно)' },
       { note: 'Месячный тариф продаётся только онлайн (ТЗ 2.1).' }
@@ -466,11 +501,17 @@ async function licensesView() {
   };
 
   return h('section', { class: 'card' },
+    outdatedNotice(),
     h('div', { class: 'row' },
       h('h2', { class: 'grow' }, filter ? `Лицензии: ${filter.name}` : 'Лицензии'),
+      h('div', { class: 'seg', role: 'group', 'aria-label': 'Приложение' },
+        [['', 'Все'], ...state.products.map(p => [p.code, p.code])].map(([code, label]) =>
+          h('button', { class: state.productFilter === code ? 'active' : undefined, 'aria-pressed': String(state.productFilter === code),
+            onclick: () => { state.productFilter = code; render(); } }, label))),
       filter && h('button', { onclick: () => { state.customerFilter = null; render(); } }, 'Все клиенты'),
       h('button', { class: 'primary', onclick: create }, 'Новая лицензия')),
     table([
+      { title: 'Приложение', value: l => productTag(l.product) },
       { title: 'Номер', value: l => h('span', { class: 'mono' }, l.id) },
       { title: 'Клиент', value: l => l.customer_name },
       { title: 'Тариф', value: l => `${PLAN[l.plan] ?? l.plan}, ${MODE[l.activation_mode]}` },
@@ -484,6 +525,7 @@ async function licenseView() {
   const d = await api('GET', `/admin/api/licenses/${encodeURIComponent(state.licenseId)}`);
   const l = d.license;
   const revoked = l.status === 'REVOKED';
+  const ext = productInfo(l.product)?.ext ?? { clock: 'clock' };
 
   const renew = async () => {
     const values = await ask(`Продление ${l.id}`, [
@@ -530,7 +572,7 @@ async function licenseView() {
     const values = await ask('Разблокировка часов', [
       { note: 'Для офлайн-клиента в состоянии «часы переведены назад» (ТЗ 6.3). Отметка времени клиента будет заменена указанной датой.' },
       { name: 'high_water_to', label: 'Новая отметка времени', type: 'date', value: new Date().toISOString().slice(0, 10) }
-    ], 'Выпустить .kdrclock');
+    ], `Выпустить .${ext.clock}`);
     if (!values) return;
     const file = await act(() => api('POST', `/admin/api/activations/${activation.id}/clock-reset`,
       { high_water_to: `${values.high_water_to}T00:00:00Z` }), 'Файл разблокировки выпущен');
@@ -553,16 +595,19 @@ async function licenseView() {
     h('section', { class: 'card' },
       h('div', { class: 'row' },
         h('button', { onclick: () => go('licenses') }, '← К списку'),
-        h('h2', { class: 'grow' }, `Лицензия ${l.id}`),
+        h('h2', { class: 'grow' }, `Лицензия ${l.id}`, ' ', productTag(l.product)),
         !revoked && l.plan !== 'PERPETUAL' && h('button', { class: 'primary', onclick: renew }, 'Продлить'),
         !revoked && h('button', { class: 'danger', onclick: revoke }, 'Отозвать')),
+      !productInfo(l.product)?.kid && h('div', { class: 'notice bad' },
+        `Ключ подписи ${l.product} не загружен: файлы этой лицензии сейчас не выпускаются. Как его подключить — license-server/README.md.`),
       h('dl', { class: 'facts' },
+        h('dt', {}, 'Приложение'), h('dd', {}, l.product),
         h('dt', {}, 'Клиент'), h('dd', {}, `${l.customer_name} (${l.customer_id})`),
         h('dt', {}, 'Статус'), h('dd', {}, badge(l.status)),
         h('dt', {}, 'Тариф'), h('dd', {}, `${PLAN[l.plan]}, ${MODE[l.activation_mode]}, редакция ${l.edition}`),
         h('dt', {}, 'Места'), h('dd', {}, `${d.activations.filter(a => a.status === 'ACTIVE' || a.status === 'FORK_SUSPECTED').length} из ${l.seats}`),
         h('dt', {}, 'Оплачено до'), h('dd', {}, l.paid_until ? `${date(l.paid_until)} + ${l.grace_days} льготных дн.` : 'бессрочно'),
-        h('dt', {}, 'Версии KADRA'), h('dd', {}, l.max_version ? `до ${l.max_version}` : 'все'),
+        h('dt', {}, `Версии ${l.product}`), h('dd', {}, l.max_version ? `до ${l.max_version}` : 'все'),
         h('dt', {}, 'Переносы за год'), h('dd', {}, `${d.transfers_last_year} из ${d.plan.max_transfers_per_year}`),
         h('dt', {}, 'Создана'), h('dd', {}, dateTime(l.created_at)))),
     h('section', { class: 'card' },
@@ -576,7 +621,7 @@ async function licenseView() {
           ? h('div', { class: 'row' },
               a.status === 'FORK_SUSPECTED' && h('button', { onclick: () => clearFork(a) }, 'Снять подозрение'),
               h('button', { onclick: () => issue(a) }, 'Выпустить файл'),
-              h('button', { onclick: () => clockReset(a) }, '.kdrclock'),
+              h('button', { onclick: () => clockReset(a) }, `.${ext.clock}`),
               h('button', { class: 'danger', onclick: () => release(a) }, 'Освободить'))
           : '' }
       ], d.activations)),
@@ -621,15 +666,17 @@ const ACTION = {
 function offlineView() {
   const output = h('div', { class: 'card', hidden: true });
   let request = null;
+  // Its extension tells the server which application made the request.
+  let filename = '';
   const options = { transfer_from: '', approve_transfer: false, override_transfer_limit: false };
 
   const inspect = async () => {
-    const decision = await act(() => api('POST', '/v1/offline/inspect', { request, ...options }));
+    const decision = await act(() => api('POST', '/v1/offline/inspect', { request, filename, ...options }));
     if (decision) showDecision(decision);
   };
 
   const run = async () => {
-    const result = await act(() => api('POST', '/v1/offline/process', { request, ...options }), 'Выполнено');
+    const result = await act(() => api('POST', '/v1/offline/process', { request, filename, ...options }), 'Выполнено');
     if (!result) return;
     if (result.file) download(result.file);
     output.replaceChildren(...shown(
@@ -652,10 +699,12 @@ function offlineView() {
         h('dt', {}, 'Тип'), h('dd', {}, r.type),
         h('dt', {}, 'Компьютер'), h('dd', {}, r.device_name),
         h('dt', {}, 'Ключ устройства'), h('dd', { class: 'mono' }, `${r.device_key}…`),
-        h('dt', {}, 'Версия KADRA'), h('dd', {}, r.app_version),
+        h('dt', {}, 'Файл'), h('dd', { class: 'mono' }, filename),
+        h('dt', {}, 'Версия приложения'), h('dd', {}, r.app_version),
         h('dt', {}, 'Время на компьютере'), h('dd', {}, dateTime(r.client_time)),
         r.license_key_hint && [h('dt', {}, 'Ключ лицензии'), h('dd', { class: 'mono' }, r.license_key_hint)],
-        d.license && [h('dt', {}, 'Лицензия'), h('dd', {}, `${d.license.id} — ${d.license.customer_name}, ${PLAN[d.license.plan]}, ${MODE[d.license.activation_mode]}`)],
+        d.license && [h('dt', {}, 'Лицензия'), h('dd', {}, productTag(d.license.product), ' ',
+          `${d.license.id} — ${d.license.customer_name}, ${PLAN[d.license.plan]}, ${MODE[d.license.activation_mode]}`)],
         d.seats && [h('dt', {}, 'Места'), h('dd', {}, `${d.seats.used} из ${d.seats.total}`)],
         d.fp_match !== null && [h('dt', {}, 'Совпадение отпечатка'), h('dd', {}, `${d.fp_match} из 3`)],
         d.transfers && [h('dt', {}, 'Переносы за год'), h('dd', {}, `${d.transfers.last_year} из ${d.transfers.limit}`)]),
@@ -681,14 +730,15 @@ function offlineView() {
           d.action === 'DEACTIVATE' ? 'Освободить место' : 'Выпустить файл лицензии'))));
   }
 
-  const input = h('input', { type: 'file', accept: '.kdrreq,.kdrdeact,application/json',
+  const input = h('input', { type: 'file', accept: [...requestExtensions(), 'application/json'].join(','),
     onchange: async event => {
       const file = event.target.files[0];
       if (!file) return;
       try {
         request = JSON.parse(await file.text());
+        filename = file.name;
       } catch {
-        toast('Это не файл запроса KADRA', 'error');
+        toast('Это не файл запроса KADRA или SALDO', 'error');
         return;
       }
       Object.assign(options, { transfer_from: '', approve_transfer: false, override_transfer_limit: false });
@@ -698,8 +748,11 @@ function offlineView() {
 
   return [
     h('section', { class: 'card' },
+      outdatedNotice(),
       h('h2', {}, 'Офлайн-файлы'),
-      h('p', { class: 'muted' }, 'Загрузите файл запроса (.kdrreq) или подтверждение деактивации (.kdrdeact), полученный от клиента. Сначала будет показано, что он просит; ничего не меняется до подтверждения.'),
+      h('p', { class: 'muted' }, 'Загрузите файл запроса или подтверждение деактивации, полученный от клиента: '
+        + 'для KADRA — .kdrreq / .kdrdeact, для SALDO — .saldoreq / .saldodeact. '
+        + 'Сначала будет показано, что он просит; ничего не меняется до подтверждения.'),
       input),
     output
   ];
@@ -773,7 +826,8 @@ async function paymentsView() {
       table([
         { title: 'Дата оплаты', value: p => date(p.paid_on) },
         { title: 'Клиент', value: p => p.customer_name },
-        { title: 'Лицензия', value: p => h('button', { class: 'link', onclick: () => openLicense(p.license_id) }, p.license_id) },
+        { title: 'Лицензия', value: p => [productTag(p.product), ' ',
+          h('button', { class: 'link', onclick: () => openLicense(p.license_id) }, p.license_id)] },
         { title: 'Сумма', value: p => p.amount === null ? '—' : `${p.amount} ${p.currency ?? ''}` },
         { title: 'Способ', value: p => [PAYMENT_SOURCE[p.source] ?? p.source, p.external_id && h('div', { class: 'muted' }, `№ ${p.external_id}`)] },
         { title: 'Продлено', value: p => `${date(p.period_from)} → ${date(p.period_to)}` },
@@ -857,7 +911,7 @@ async function render() {
   const current = state.view === 'license' ? 'licenses' : state.view;
   root.replaceChildren(
     h('header', {},
-      h('h1', {}, 'KADRA License Manager'),
+      h('h1', {}, 'License Manager', h('span', { class: 'muted subtitle' }, 'KADRA · SALDO')),
       h('nav', {}, Object.entries(VIEWS).filter(([, [title]]) => title).map(([key, [title]]) =>
         h('button', { class: key === current ? 'active' : undefined, onclick: () => go(key) }, title))),
       h('span', { class: 'muted' }, state.user),
@@ -876,9 +930,20 @@ async function render() {
 }
 
 async function start() {
-  state.plans = await api('GET', '/admin/api/plans');
+  const [plans, products] = await Promise.allSettled([api('GET', '/admin/api/plans'), api('GET', '/admin/api/products')]);
+  state.plans = plans.status === 'fulfilled' ? plans.value : [];
+  // A server from before SALDO has no /products. It would also ignore the
+  // application chosen for a new licence and make every one a KADRA licence,
+  // so the panel says so and does not offer to create one.
+  state.serverOutdated = products.status === 'rejected' && products.reason?.code === 'NOT_FOUND';
+  state.products = products.status === 'fulfilled' ? products.value : KNOWN_PRODUCTS;
   render();
 }
+
+const outdatedNotice = () => state.serverOutdated && h('div', { class: 'notice bad' },
+  'Сервер лицензий работает на старой версии — его не перезапустили после обновления. '
+  + 'Остановите его (Ctrl+C в окне сервера) и запустите снова, затем обновите эту страницу. '
+  + 'До перезапуска лицензии SALDO создать нельзя: старый сервер выдал бы вместо них лицензии KADRA.');
 
 api('GET', '/admin/api/me')
   .then(me => {

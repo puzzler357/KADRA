@@ -10,7 +10,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { DEFAULT_PLANS } from './core/rules.ts';
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS customers (
@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS plans (
 
 CREATE TABLE IF NOT EXISTS licenses (
   id              TEXT PRIMARY KEY,
+  -- KADRA or SALDO (src/products.ts); fixed for the licence's whole life.
+  product         TEXT NOT NULL DEFAULT 'KADRA',
   key_hash        TEXT UNIQUE,
   customer_id     TEXT NOT NULL REFERENCES customers (id),
   plan            TEXT NOT NULL REFERENCES plans (code),
@@ -172,6 +174,13 @@ export function openDb(file: string): Db {
     db.exec('ALTER TABLE admins ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0');
   }
 
+  // Schema 2 served KADRA alone. Every licence in such a database is KADRA's,
+  // which is exactly what the column's default says - nothing else changes.
+  const licenseColumns = db.prepare('PRAGMA table_info(licenses)').all() as { name: string }[];
+  if (!licenseColumns.some(column => column.name === 'product')) {
+    db.exec("ALTER TABLE licenses ADD COLUMN product TEXT NOT NULL DEFAULT 'KADRA'");
+  }
+
   // Plans are seeded once and then belong to the owner: a later edit of the
   // defaults in code must not overwrite a changed grace period in production.
   const insertPlan = db.prepare(`INSERT OR IGNORE INTO plans (code, term_months, lease_days_online,
@@ -218,7 +227,7 @@ export function inTransaction<T>(db: Db, work: () => T): T {
   }
 }
 
-/** The next value of a named sequence, for readable ids like KDR-2026-000017. */
+/** The next value of a named sequence, for readable ids like KDR-2026-000017 or SALDO-2026-000003. */
 export function nextValue(db: Db, name: string): number {
   db.prepare('INSERT INTO counters (name, value) VALUES (?, 1) ON CONFLICT (name) DO UPDATE SET value = value + 1')
     .run(name);

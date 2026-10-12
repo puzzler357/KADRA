@@ -9,9 +9,10 @@
  *   POST /v1/payments/<source>
  *   Content-Type: application/json
  *   X-KDR-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(secret, "<t>.<raw body>")>
+ *   (X-SALDO-Signature is accepted as the same header: SALDO's own server named it so)
  *
  *   { "payment_id": "unique in the sender",           required
- *     "license_id": "KDR-2026-000001",                one of these two
+ *     "license_id": "KDR-2026-000001",                one of these two; SALDO-… for SALDO
  *     "license_key": "KDR-XXXXX-XXXXX-XXXXX-XXXXX",
  *     "periods": 1,                                   terms paid for, default 1
  *     "amount": 1200, "currency": "TMT",              for the books, optional
@@ -25,7 +26,7 @@
 import crypto from 'node:crypto';
 import type { Db } from './db.ts';
 import { RuleError, iso } from './core/rules.ts';
-import { hashLicenseKey, normalizeLicenseKey } from './core/licenseKey.ts';
+import { hashLicenseKey, licenseKeyCandidates } from './core/licenseKey.ts';
 import type { LicenseService } from './service.ts';
 
 /** How old a signed notification may be. */
@@ -178,11 +179,11 @@ function resolveLicense(service: LicenseService, body: Record<string, unknown>):
     return service.license(body.license_id.trim()).id;
   }
   if (typeof body.license_key === 'string') {
-    const key = normalizeLicenseKey(body.license_key);
-    const row = key
-      ? service.db.prepare('SELECT id FROM licenses WHERE key_hash = ?').get(hashLicenseKey(key)) as { id: string } | undefined
-      : undefined;
-    if (row) return row.id;
+    // KADRA or SALDO: the key's prefix - or, without one, the stored hash - says which.
+    for (const { key } of licenseKeyCandidates(body.license_key)) {
+      const row = service.db.prepare('SELECT id FROM licenses WHERE key_hash = ?').get(hashLicenseKey(key)) as { id: string } | undefined;
+      if (row) return row.id;
+    }
     throw new RuleError('NOT_FOUND', 'Лицензии с таким ключом нет', 404);
   }
   throw new RuleError('VALIDATION', 'Нужен license_id или license_key');
