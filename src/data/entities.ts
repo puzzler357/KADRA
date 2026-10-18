@@ -41,6 +41,12 @@ export interface EntityDef {
    * здесь были бы ложью о том, что происходило в системе.
    */
   selfFilling?: boolean;
+  /**
+   * Версия миграции, в которой таблица появилась. Первые одиннадцать таблиц
+   * созданы миграцией 5; каждая следующая получает свою миграцию, иначе в
+   * уже работающих базах её никто не создал бы.
+   */
+  since?: number;
 }
 
 const text = (field: string, column: string, notNull = true): ColumnDef =>
@@ -145,6 +151,9 @@ export const ENTITIES: EntityDef[] = [
       num('toSalary', 'to_salary'),
       text('orderNo', 'order_no', false),
       text('reason', 'reason', false),
+      // ФИО на момент операции: журнал приказов не должен терять имя, если
+      // карточку потом удалили. Колонка добавлена миграцией 9.
+      text('employeeName', 'employee_name', false),
     ],
   },
   {
@@ -198,6 +207,38 @@ export const ENTITIES: EntityDef[] = [
     ],
   },
   {
+    table: 'staffing_revisions',
+    stateKey: 'staffingRevisions',
+    route: 'staffing-revisions',
+    selfFilling: true,
+    since: 8,
+    orderBy: 'effective_date DESC, created_at DESC',
+    columns: [
+      text('title', 'title'),
+      text('effectiveDate', 'effective_date'),
+      text('createdAt', 'created_at'),
+      text('note', 'note', false),
+      // JSON-снимок подразделений и должностей на дату редакции.
+      text('snapshot', 'snapshot'),
+    ],
+  },
+  {
+    table: 'review_cycles',
+    stateKey: 'reviewCycles',
+    route: 'review-cycles',
+    selfFilling: true,
+    since: 8,
+    orderBy: 'started_at DESC',
+    columns: [
+      text('period', 'period'),
+      // JSON-массив id подразделений; пустой массив — вся организация.
+      text('scope', 'scope'),
+      text('startedAt', 'started_at'),
+      // active | closed
+      text('status', 'status'),
+    ],
+  },
+  {
     table: 'kb_articles',
     stateKey: 'kbArticles',
     route: 'kb-articles',
@@ -246,6 +287,8 @@ export const TABLES = {
   backups: 'backups',
   kbCategories: 'kb_categories',
   kbArticles: 'kb_articles',
+  staffingRevisions: 'staffing_revisions',
+  reviewCycles: 'review_cycles',
 } as const;
 
 /** DDL таблицы. Один источник для обеих схем. */
@@ -261,8 +304,16 @@ export function createIndexSql(entity: EntityDef): string[] {
     .map((c) => `CREATE INDEX IF NOT EXISTS idx_${entity.table}_${c.column} ON ${entity.table}(${c.column});`);
 }
 
-export function allSchemaSql(): string {
-  return ENTITIES.flatMap((e) => [createTableSql(e), ...createIndexSql(e)]).join('\n  ');
+/**
+ * DDL таблиц, появившихся в миграции `version`. Без аргумента — таблицы
+ * миграции 5: её текст не должен меняться от того, что в список добавили
+ * новую сущность.
+ */
+export function allSchemaSql(version = 5): string {
+  return ENTITIES
+    .filter((e) => (e.since ?? 5) === version)
+    .flatMap((e) => [createTableSql(e), ...createIndexSql(e)])
+    .join('\n  ');
 }
 
 /** Строка БД -> объект приложения. */

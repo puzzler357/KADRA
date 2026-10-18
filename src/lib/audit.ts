@@ -18,5 +18,12 @@ export const auditActionLabel = (t: Translate, action: string): string =>
 export const auditEntityLabel = (t: Translate, entity: string): string =>
   t(`settings.audit.entities.${entity}`, { defaultValue: entity });
 
-/** «2026-10-09T14:30:00.000Z» → «2026-10-09 14:30». */
-export const auditTime = (ts: string): string => ts.replace('T', ' ').slice(0, 16);
+/** Ключи настроек оформления — остальные относятся к общим настройкам. */
+const APPEARANCE_KEYS = new Set(['theme', 'accentColor', 'density', 'fontSize']);
+
+/**
+ * Сущность записи журнала для изменённой настройки. Раньше любое изменение
+ * подписывалось «Оформление» — даже название организации.
+ */
+export const auditEntityOfSetting = (key: string): string =>
+  APPEARANCE_KEYS.has(key) || key === 'reset' ? 'appearance' : 'settings';

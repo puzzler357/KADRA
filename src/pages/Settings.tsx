@@ -1,17 +1,21 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import { useAppStore } from '../store/useAppStore';
 import { useDatabaseStore, TABLES } from '../store/useDatabaseStore';
 import type { AuditEntry, BackupEntry } from '../store/useDatabaseStore';
 import { exportToExcel } from '../lib/excel';
 import ImportWizard from '../components/ImportWizard';
 import LicenseSettings from '../components/LicenseSettings';
-import { useMoney } from '../lib/money';
+import { formatMoney } from '../lib/money';
 import type { CurrencyDecimals, CurrencyPosition, ThousandsSeparator } from '../lib/money';
 import * as api from '../data';
-import { auditActionLabel, auditEntityLabel } from '../lib/audit';
+import { hasDemoRows, demoIds } from '../data/demo';
+import { auditActionLabel, auditEntityLabel, auditEntityOfSetting } from '../lib/audit';
+import { useDates, localDateOf, fileStamp } from '../lib/dates';
+import type { DateFormat } from '../store/useAppStore';
 import PasswordInput from '../components/PasswordInput';
-import { Settings as SettingsIcon, ShieldCheck, Key, Shield, Database, Link, Palette, Download, RefreshCw, Check, Sun, Moon, Monitor } from 'lucide-react';
+import { Settings as SettingsIcon, ShieldCheck, Key, Shield, Database, Link, Palette, Download, Check, Sun, Moon, Monitor } from 'lucide-react';
 import { clickable } from '../lib/a11y';
 import { useNotify } from '../components/Toasts';
 
@@ -26,15 +30,17 @@ export default function Settings() {
     currencySymbol, currencyPosition, currencyDecimals, thousandsSeparator,
     setCurrencySymbol, setCurrencyPosition, setCurrencyDecimals, setThousandsSeparator,
     docxTemplatePath, setDocxTemplatePath,
-    orgName, orgInn, orgDirector, dateFormat, startScreen,
-    setOrgName, setOrgInn, setOrgDirector, setDateFormat, setStartScreen,
+    orgName, orgInn, orgDirector, dateFormat, startScreen, annualVacationDays,
+    setOrgName, setOrgInn, setOrgDirector, setDateFormat, setStartScreen, setAnnualVacationDays,
     requirePassword, setRequirePassword,
     lockTimeoutMinutes, setLockTimeoutMinutes, lock,
-    resetAppearance, resetSettings,
+    resetAppearance, resetSettings, resetOrganizationSettings,
   } = useAppStore();
-  const money = useMoney();
+  const dates = useDates();
   const notify = useNotify();
-  const [activeTab, setActiveTab] = useState('general');
+  // Вкладку можно открыть ссылкой: /settings?tab=security (например, с главной).
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState(() => searchParams.get('tab') || 'general');
 
   // Учётной записи может не быть вовсе, а у существующей может не быть
   // пароля. Тогда подтверждать сброс нечем, менять нечего, а тумблер запроса
@@ -49,7 +55,33 @@ export default function Settings() {
   }, []);
 
   
-  const { auditLog, backups, createIn, removeFrom, fetchAll } = useDatabaseStore();
+  const {
+    auditLog, backups, createIn, removeFrom, fetchAll, fetchArchiveFacets, archiveFacets,
+    employees, departments, positions, templates, candidates, timeOffRequests, checklistTasks, goals, reviews, movements, kbArticles,
+  } = useDatabaseStore();
+
+  // Демо-данные первого запуска: есть ли что удалять. Архив в стор целиком
+  // не грузится, поэтому для него смотрим список сотрудников архива.
+  useEffect(() => { void fetchArchiveFacets(); }, [fetchArchiveFacets]);
+  const demoPresent = useMemo(() => {
+    const demoEmployees = new Set(demoIds().employees ?? []);
+    return hasDemoRows({
+      employees, departments, positions, templates, candidates,
+      time_off_requests: timeOffRequests, checklist_tasks: checklistTasks, goals, reviews, movements, kb_articles: kbArticles,
+    }) || archiveFacets.employees.some((e) => demoEmployees.has(e.id));
+  }, [employees, departments, positions, templates, candidates, timeOffRequests, checklistTasks, goals, reviews, movements, kbArticles, archiveFacets]);
+
+  const handleClearDemo = async () => {
+    if (!(await notify.confirm(t('settings.demo.confirm'), { danger: true }))) return;
+    try {
+      await api.clearDemoData();
+      await fetchAll();
+      await fetchArchiveFacets();
+      notify.success(t('settings.demo.cleared'));
+    } catch (e) {
+      notify.error(e instanceof Error ? e.message : t('settings.security.resetError'));
+    }
+  };
 
   // Фильтры журнала. Раньше оба селекта и поле даты были декорацией.
   const [auditAction, setAuditAction] = useState('all');
@@ -68,59 +100,103 @@ export default function Settings() {
   const filteredAudit = useMemo(() => auditLog.filter(a => {
     if (auditAction !== 'all' && a.action !== auditAction) return false;
     if (auditEntity !== 'all' && a.entity !== auditEntity) return false;
-    // ts хранится в ISO, поэтому сравнение строк по префиксу даты корректно.
-    if (auditFrom && a.ts.slice(0, 10) < auditFrom) return false;
+    // Сравниваем по местной дате события, а не по дате в UTC.
+    if (auditFrom && localDateOf(a.ts) < auditFrom) return false;
     return true;
   }), [auditLog, auditAction, auditEntity, auditFrom]);
 
   const handleAuditExport = async () => {
     await exportToExcel(filteredAudit.map(a => ({
-      [t('settings.audit.datetime')]: a.ts.replace('T', ' ').slice(0, 19),
+      [t('settings.audit.datetime')]: dates.dateTime(a.ts, true),
       [t('settings.audit.action')]: auditActionLabel(t, a.action),
       [t('settings.audit.entity')]: auditEntityLabel(t, a.entity),
       [t('settings.audit.diff')]: a.diff ?? '',
     })), 'AuditLog');
   };
 
-  // Изменения оформления приходят с экрана, а не из слоя данных, поэтому
-  // пишутся здесь — единственное место, где журнал пополняет интерфейс.
+  // Изменения настроек приходят с экрана, а не из слоя данных, поэтому
+  // пишутся здесь. Одно событие на одно действие: раньше журнал получал
+  // запись на каждую нажатую клавишу в поле.
   const logSetting = (key: string, value: string) => {
     void createIn<AuditEntry>(TABLES.auditLog, {
       ts: new Date().toISOString(),
       action: 'settings',
-      entity: 'appearance',
+      entity: auditEntityOfSetting(key),
       entityId: key,
       diff: `${key}: ${value}`,
     });
   };
 
+  // «Общие»: поля правятся в черновике и применяются кнопкой «Сохранить».
+  const savedGeneral = {
+    orgName, orgInn, orgDirector, dateFormat, startScreen, docxTemplatePath, annualVacationDays,
+    currencySymbol, currencyPosition, currencyDecimals, thousandsSeparator,
+  };
+  const [generalDraft, setGeneralDraft] = useState(savedGeneral);
+  const changedGeneral = (Object.keys(savedGeneral) as (keyof typeof savedGeneral)[])
+    .filter((key) => generalDraft[key] !== savedGeneral[key]);
+  const setDraft = <K extends keyof typeof savedGeneral>(key: K, value: (typeof savedGeneral)[K]) =>
+    setGeneralDraft((prev) => ({ ...prev, [key]: value }));
+
+  const saveGeneral = () => {
+    if (changedGeneral.length === 0) return;
+    const d = generalDraft;
+    setOrgName(d.orgName.trim() || 'KADRA');
+    setOrgInn(d.orgInn.trim());
+    setOrgDirector(d.orgDirector.trim());
+    setDateFormat(d.dateFormat);
+    setStartScreen(d.startScreen);
+    setDocxTemplatePath(d.docxTemplatePath.trim());
+    setAnnualVacationDays(Number(d.annualVacationDays));
+    setCurrencySymbol(d.currencySymbol);
+    setCurrencyPosition(d.currencyPosition);
+    setCurrencyDecimals(d.currencyDecimals);
+    setThousandsSeparator(d.thousandsSeparator);
+    void createIn<AuditEntry>(TABLES.auditLog, {
+      ts: new Date().toISOString(),
+      action: 'settings',
+      entity: 'settings',
+      entityId: changedGeneral.join(','),
+      diff: changedGeneral.join(', '),
+    });
+    setGeneralDraft({ ...d, orgName: d.orgName.trim() || 'KADRA' });
+    notify.success(t('settings.general.saved'));
+  };
+
   // Сброс устроен ступенями: от безобидного сброса оформления до полного
   // factory reset. Раньше была одна кнопка, стиравшая всё разом.
-  const MODULE_TABLES: { table: string; label: string }[] = [
-    { table: 'candidates', label: t('reports.srcCandidates') },
-    { table: 'time_off_requests', label: t('nav.timeoff') },
-    { table: 'checklist_tasks', label: t('nav.onboarding') },
-    { table: 'kb_articles', label: t('nav.knowledge_base') },
-    { table: 'archives', label: t('nav.archive') },
-    { table: 'timesheets', label: t('nav.timesheet') },
-    { table: 'movements', label: t('nav.movements') },
+  const MODULE_TABLES: { id: string; tables: string[]; label: string }[] = [
+    { id: 'candidates', tables: ['candidates'], label: t('nav.recruiting') },
+    { id: 'timeoff', tables: ['time_off_requests'], label: t('nav.timeoff') },
+    { id: 'onboarding', tables: ['checklist_tasks'], label: t('nav.onboarding') },
+    { id: 'performance', tables: ['goals', 'reviews', 'review_cycles'], label: t('nav.performance') },
+    { id: 'kb', tables: ['kb_articles'], label: t('nav.knowledge_base') },
+    { id: 'archive', tables: ['archives'], label: t('nav.archive') },
+    { id: 'timesheet', tables: ['timesheets'], label: t('nav.timesheet') },
+    { id: 'movements', tables: ['movements'], label: t('nav.movements') },
   ];
 
   const [modulesToClear, setModulesToClear] = useState<string[]>([]);
   const [factoryPhrase, setFactoryPhrase] = useState('');
 
-  const toggleModule = (table: string) => {
-    setModulesToClear(prev => (prev.includes(table) ? prev.filter(x => x !== table) : [...prev, table]));
+  // Пароль подтверждения нужен, только если он задан. Без пароля защитой
+  // остаются контрольное слово и подтверждения — раньше кнопки сброса без
+  // пароля не нажимались вовсе, и сбросить данные было невозможно.
+  const passwordConfirmed = !hasPassword || resetPassword.length > 0;
+
+  const toggleModule = (id: string) => {
+    setModulesToClear(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
   };
 
   const handleClearModules = async () => {
     if (modulesToClear.length === 0) return;
     if (!(await notify.confirm(t('settings.security.clearConfirm'), { danger: true }))) return;
     try {
-      const result = await api.resetTables(resetPassword, modulesToClear);
+      const tables = MODULE_TABLES.filter(m => modulesToClear.includes(m.id)).flatMap(m => m.tables);
+      await api.resetTables(resetPassword, tables);
       await fetchAll();
+      notify.success(t('settings.security.cleared', { count: modulesToClear.length }));
       setModulesToClear([]);
-      notify.success(t('settings.security.cleared', { n: result.cleared.length }));
     } catch (e) {
       notify.error(e instanceof Error ? e.message : t('settings.security.resetError'));
     }
@@ -140,10 +216,12 @@ export default function Settings() {
 
     try {
       await api.resetSystem(resetPassword);
-      localStorage.removeItem('hr-docs-local-db');
-      localStorage.removeItem('hr-docs-app-storage');
+      // Реквизиты организации уходят вместе с данными; оформление и язык —
+      // личные предпочтения — и вход в программу остаются.
+      resetOrganizationSettings();
       notify.success(t('settings.security.resetSuccess'));
-      window.location.reload();
+      // Перезагрузка — чтобы ни один экран не держал в памяти стёртое.
+      setTimeout(() => window.location.reload(), 600);
     } catch (e) {
       notify.error(e instanceof Error ? e.message : t('settings.security.resetError'));
     }
@@ -161,8 +239,11 @@ export default function Settings() {
     () => backups.reduce<string | null>((latest, b) => (!latest || b.createdAt > latest ? b.createdAt : latest), null),
     [backups],
   );
+  // Момент открытия экрана: возраст копии считается от него, а не от
+  // каждого перерисовывания.
+  const [openedAt] = useState(() => Date.now());
   const backupIsStale = lastBackup === null
-    || Date.now() - new Date(lastBackup).getTime() > 7 * 24 * 60 * 60 * 1000;
+    || openedAt - new Date(lastBackup).getTime() > 7 * 24 * 60 * 60 * 1000;
   const restoreInputRef = useRef<HTMLInputElement>(null);
 
   const handleCreateBackup = async () => {
@@ -170,7 +251,8 @@ export default function Settings() {
     try {
       const payload = await api.exportBackup();
       const rows = Object.values(payload.data).reduce((sum, list) => sum + list.length, 0);
-      const fileName = `kadra-backup-${payload.createdAt.slice(0, 19).replace(/[:T]/g, '-')}.json`;
+      // Имя файла — по местному времени, как его видит пользователь.
+      const fileName = `kadra-backup-${fileStamp(new Date(payload.createdAt))}.json`;
 
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -185,6 +267,7 @@ export default function Settings() {
         fileName,
         rows,
       });
+      notify.success(t('settings.backup.savedAs', { file: fileName }));
     } catch (e) {
       notify.error(e instanceof Error ? e.message : t('settings.backup.failed'));
     } finally {
@@ -242,7 +325,8 @@ export default function Settings() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-3 w-full text-left px-4 py-3 rounded-xl transition-colors ${activeTab === tab.id ? 'bg-accent-600/10 text-accent-400 font-medium' : 'text-muted hover:bg-surface-hover hover:text-primary'}`}
+              aria-current={activeTab === tab.id ? 'page' : undefined}
+              className={`flex items-center gap-3 w-full text-left px-4 py-3 rounded-xl transition-colors ${activeTab === tab.id ? 'bg-accent-600/10 text-accent-700 dark:text-accent-300 font-medium' : 'text-muted hover:bg-surface-hover hover:text-primary'}`}
             >
               <tab.icon className="w-5 h-5 flex-shrink-0" />
               <span className="text-sm">{tab.label}</span>
@@ -258,38 +342,42 @@ export default function Settings() {
 
               <div className="space-y-6">
                 <div>
-                  <label className="block text-sm font-medium mb-2 text-secondary">{t('settings.general.orgName')}</label>
+                  <label htmlFor="set-org-name" className="block text-sm font-medium mb-2 text-secondary">{t('settings.general.orgName')}</label>
                   <input
+                    id="set-org-name"
                     type="text"
-                    value={orgName}
-                    onChange={(e) => { setOrgName(e.target.value); logSetting('orgName', e.target.value); }}
+                    value={generalDraft.orgName}
+                    onChange={(e) => setDraft('orgName', e.target.value)}
                     className="w-full bg-surface border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-2 text-secondary">{t('settings.general.inn')}</label>
+                  <label htmlFor="set-org-inn" className="block text-sm font-medium mb-2 text-secondary">{t('settings.general.inn')}</label>
                   <input
+                    id="set-org-inn"
                     type="text"
-                    value={orgInn}
-                    onChange={(e) => { setOrgInn(e.target.value); logSetting('orgInn', e.target.value); }}
+                    value={generalDraft.orgInn}
+                    onChange={(e) => setDraft('orgInn', e.target.value)}
                     className="w-full bg-surface border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-2 text-secondary">{t('settings.general.director')}</label>
+                  <label htmlFor="set-org-director" className="block text-sm font-medium mb-2 text-secondary">{t('settings.general.director')}</label>
                   <input
+                    id="set-org-director"
                     type="text"
-                    value={orgDirector}
-                    onChange={(e) => { setOrgDirector(e.target.value); logSetting('orgDirector', e.target.value); }}
+                    value={generalDraft.orgDirector}
+                    onChange={(e) => setDraft('orgDirector', e.target.value)}
                     className="w-full bg-surface border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium mb-2 text-secondary">{t('settings.general.dateFormat')}</label>
+                    <label htmlFor="set-date-format" className="block text-sm font-medium mb-2 text-secondary">{t('settings.general.dateFormat')}</label>
                     <select
-                      value={dateFormat}
-                      onChange={(e) => { setDateFormat(e.target.value as any); logSetting('dateFormat', e.target.value); }}
+                      id="set-date-format"
+                      value={generalDraft.dateFormat}
+                      onChange={(e) => setDraft('dateFormat', e.target.value as DateFormat)}
                       className="w-full bg-surface border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
                     >
                       <option value="dd.MM.yyyy">31.12.2026</option>
@@ -298,10 +386,11 @@ export default function Settings() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium mb-2 text-secondary">{t('settings.general.startScreen')}</label>
+                    <label htmlFor="set-start-screen" className="block text-sm font-medium mb-2 text-secondary">{t('settings.general.startScreen')}</label>
                     <select
-                      value={startScreen}
-                      onChange={(e) => { setStartScreen(e.target.value); logSetting('startScreen', e.target.value); }}
+                      id="set-start-screen"
+                      value={generalDraft.startScreen}
+                      onChange={(e) => setDraft('startScreen', e.target.value)}
                       className="w-full bg-surface border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
                     >
                       <option value="/dashboard">{t('nav.dashboard')}</option>
@@ -312,24 +401,41 @@ export default function Settings() {
                     </select>
                   </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium mb-2 text-secondary">{t('settings.language')}</label>
-                  <select 
-                    value={language} 
-                    onChange={(e) => { setLanguage(e.target.value); logSetting('language', e.target.value); }}
-                    className="w-full bg-surface border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
-                  >
-                    <option value="ru">Русский</option>
-                    <option value="en">English</option>
-                    <option value="tk">Türkmençe</option>
-                  </select>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="set-language" className="block text-sm font-medium mb-2 text-secondary">{t('settings.language')}</label>
+                    {/* Язык меняется сразу: это видно по самому экрану. */}
+                    <select
+                      id="set-language"
+                      value={language}
+                      onChange={(e) => { setLanguage(e.target.value); logSetting('language', e.target.value); }}
+                      className="w-full bg-surface border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
+                    >
+                      <option value="ru">Русский</option>
+                      <option value="en">English</option>
+                      <option value="tk">Türkmençe</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="set-vacation-days" className="block text-sm font-medium mb-2 text-secondary">{t('settings.general.vacationDays')}</label>
+                    <input
+                      id="set-vacation-days"
+                      type="number"
+                      min={0}
+                      max={366}
+                      value={generalDraft.annualVacationDays}
+                      onChange={(e) => setDraft('annualVacationDays', Number(e.target.value))}
+                      className="w-full bg-surface border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
+                    />
+                  </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-2 text-secondary">{t('docgen.docxTemplate')}</label>
+                  <label htmlFor="set-docx" className="block text-sm font-medium mb-2 text-secondary">{t('docgen.docxTemplate')}</label>
                   <input
+                    id="set-docx"
                     type="text"
-                    value={docxTemplatePath}
-                    onChange={(e) => { setDocxTemplatePath(e.target.value); logSetting('docxTemplatePath', e.target.value); }}
+                    value={generalDraft.docxTemplatePath}
+                    onChange={(e) => setDraft('docxTemplatePath', e.target.value)}
                     className="w-full bg-surface border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
                   />
                   <p className="text-xs text-muted mt-2">{t('docgen.docxHint')}</p>
@@ -340,20 +446,22 @@ export default function Settings() {
 
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium mb-2 text-secondary">{t('settings.currency.symbol')}</label>
+                      <label htmlFor="set-cur-symbol" className="block text-sm font-medium mb-2 text-secondary">{t('settings.currency.symbol')}</label>
                       <input
+                        id="set-cur-symbol"
                         type="text"
-                        value={currencySymbol}
+                        value={generalDraft.currencySymbol}
                         maxLength={8}
-                        onChange={(e) => setCurrencySymbol(e.target.value)}
+                        onChange={(e) => setDraft('currencySymbol', e.target.value)}
                         className="w-full bg-surface border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium mb-2 text-secondary">{t('settings.currency.position')}</label>
+                      <label htmlFor="set-cur-position" className="block text-sm font-medium mb-2 text-secondary">{t('settings.currency.position')}</label>
                       <select
-                        value={currencyPosition}
-                        onChange={(e) => setCurrencyPosition(e.target.value as CurrencyPosition)}
+                        id="set-cur-position"
+                        value={generalDraft.currencyPosition}
+                        onChange={(e) => setDraft('currencyPosition', e.target.value as CurrencyPosition)}
                         className="w-full bg-surface border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
                       >
                         <option value="prefix">{t('settings.currency.prefix')}</option>
@@ -361,10 +469,11 @@ export default function Settings() {
                       </select>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium mb-2 text-secondary">{t('settings.currency.decimals')}</label>
+                      <label htmlFor="set-cur-decimals" className="block text-sm font-medium mb-2 text-secondary">{t('settings.currency.decimals')}</label>
                       <select
-                        value={currencyDecimals}
-                        onChange={(e) => setCurrencyDecimals(Number(e.target.value) as CurrencyDecimals)}
+                        id="set-cur-decimals"
+                        value={generalDraft.currencyDecimals}
+                        onChange={(e) => setDraft('currencyDecimals', Number(e.target.value) as CurrencyDecimals)}
                         className="w-full bg-surface border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
                       >
                         <option value={0}>0</option>
@@ -372,10 +481,11 @@ export default function Settings() {
                       </select>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium mb-2 text-secondary">{t('settings.currency.separator')}</label>
+                      <label htmlFor="set-cur-separator" className="block text-sm font-medium mb-2 text-secondary">{t('settings.currency.separator')}</label>
                       <select
-                        value={thousandsSeparator}
-                        onChange={(e) => setThousandsSeparator(e.target.value as ThousandsSeparator)}
+                        id="set-cur-separator"
+                        value={generalDraft.thousandsSeparator}
+                        onChange={(e) => setDraft('thousandsSeparator', e.target.value as ThousandsSeparator)}
                         className="w-full bg-surface border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
                       >
                         <option value="space">{t('settings.currency.sepSpace')}</option>
@@ -387,14 +497,21 @@ export default function Settings() {
                   </div>
 
                   <p className="text-sm text-muted mt-4">
-                    {t('settings.currency.preview')}: <span className="text-primary tabular-nums font-medium">{money.format(1234567.89)}</span>
+                    {t('settings.currency.preview')}: <span className="text-primary tabular-nums font-medium">{formatMoney(1234567.89, generalDraft)}</span>
                   </p>
                 </div>
 
-                <div className="pt-4">
-                  <button className="bg-accent-600 hover:bg-accent-700 text-white px-6 py-2.5 rounded-xl font-medium transition-colors">
+                <div className="pt-4 flex items-center gap-4">
+                  <button
+                    onClick={saveGeneral}
+                    disabled={changedGeneral.length === 0}
+                    className="bg-accent-600 hover:bg-accent-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-xl font-medium transition-colors"
+                  >
                     {t('common.save')}
                   </button>
+                  {changedGeneral.length > 0 && (
+                    <span className="text-sm text-amber-600 dark:text-amber-400">{t('settings.general.unsaved')}</span>
+                  )}
                 </div>
               </div>
             </div>
@@ -418,17 +535,17 @@ export default function Settings() {
                 <div className="space-y-4 max-w-xl">
                   {hasPassword && (
                     <div>
-                      <label className="block text-sm font-medium mb-2 text-secondary">{t('settings.password.current')}</label>
-                      <PasswordInput value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} placeholder={t('settings.password.currentPlaceholder')} className="w-full bg-input border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500" />
+                      <label htmlFor="pwd-current" className="block text-sm font-medium mb-2 text-secondary">{t('settings.password.current')}</label>
+                      <PasswordInput id="pwd-current" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} placeholder={t('settings.password.currentPlaceholder')} className="w-full bg-input border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500" />
                     </div>
                   )}
                   <div>
-                    <label className="block text-sm font-medium mb-2 text-secondary">{t('settings.password.new')}</label>
-                    <PasswordInput value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder={t('settings.password.minChars')} className="w-full bg-input border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500" />
+                    <label htmlFor="pwd-new" className="block text-sm font-medium mb-2 text-secondary">{t('settings.password.new')}</label>
+                    <PasswordInput id="pwd-new" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder={t('settings.password.minChars')} className="w-full bg-input border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium mb-2 text-secondary">{t('settings.password.confirm')}</label>
-                    <PasswordInput value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder={t('settings.password.confirmPlaceholder')} className="w-full bg-input border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500" />
+                    <label htmlFor="pwd-confirm" className="block text-sm font-medium mb-2 text-secondary">{t('settings.password.confirm')}</label>
+                    <PasswordInput id="pwd-confirm" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder={t('settings.password.confirmPlaceholder')} className="w-full bg-input border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500" />
                   </div>
                   <button onClick={async () => {
                     if (newPassword !== confirmPassword) {
@@ -440,7 +557,7 @@ export default function Settings() {
                       return;
                     }
                     try {
-                      await api.changePassword(user?.email || '', currentPassword, newPassword);
+                      await api.changePassword(currentPassword, newPassword);
                       setHasPassword(true);
                       notify.success(t('settings.password.success'));
                       setCurrentPassword('');
@@ -461,7 +578,7 @@ export default function Settings() {
                     <button onClick={async () => {
                       if (!(await notify.confirm(t('settings.password.removeConfirm'), { danger: true }))) return;
                       try {
-                        await api.removePassword(user?.email || '', currentPassword);
+                        await api.removePassword(currentPassword);
                         setHasPassword(false);
                         setRequirePassword(false);
                         setCurrentPassword('');
@@ -472,7 +589,7 @@ export default function Settings() {
                       } catch (e) {
                         notify.error(e instanceof Error ? e.message : t('settings.password.removeError'));
                       }
-                    }} className="border border-rose-500/40 text-rose-400 hover:bg-rose-500/10 px-6 py-2.5 rounded-xl font-medium transition-colors text-sm">
+                    }} className="border border-rose-500/40 text-rose-700 dark:text-rose-400 hover:bg-rose-500/10 px-6 py-2.5 rounded-xl font-medium transition-colors text-sm">
                       {t('settings.password.remove')}
                     </button>
                   )}
@@ -503,7 +620,20 @@ export default function Settings() {
                     role="switch"
                     aria-checked={requirePassword}
                     disabled={!hasPassword}
-                    onClick={() => { setRequirePassword(!requirePassword); logSetting('requirePassword', String(!requirePassword)); }}
+                    aria-label={t('settings.security.askPassword')}
+                    onClick={async () => {
+                      // Настройка хранится в базе вместе с учётной записью:
+                      // очистка данных браузера её не выключит. Журнал пишет
+                      // слой данных.
+                      const next = !requirePassword;
+                      try {
+                        await api.setRequirePassword(next);
+                        setRequirePassword(next);
+                        notify.success(next ? t('settings.security.askPasswordOn') : t('settings.security.askPasswordOff'));
+                      } catch (e) {
+                        notify.error(e instanceof Error ? e.message : t('settings.security.resetError'));
+                      }
+                    }}
                     className={`relative w-11 h-6 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${requirePassword ? 'bg-accent-600' : 'bg-surface-3 border border-line'}`}
                   >
                     <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-all ${requirePassword ? 'left-[22px]' : 'left-0.5'}`} />
@@ -525,8 +655,9 @@ export default function Settings() {
 
                 <div className="flex flex-wrap items-end gap-4">
                   <div className="w-56">
-                    <label className="block text-sm font-medium mb-2 text-secondary">{t('settings.security.lockTimeout')}</label>
+                    <label htmlFor="lock-timeout" className="block text-sm font-medium mb-2 text-secondary">{t('settings.security.lockTimeout')}</label>
                     <select
+                      id="lock-timeout"
                       value={lockTimeoutMinutes}
                       disabled={!requirePassword}
                       onChange={(e) => { setLockTimeoutMinutes(Number(e.target.value)); logSetting('lockTimeoutMinutes', e.target.value); }}
@@ -552,7 +683,7 @@ export default function Settings() {
               <div className="bg-rose-500/5 border border-rose-500/20 rounded-2xl p-6">
                 <div className="flex items-center gap-2 mb-2">
                   <Shield className="w-5 h-5 text-rose-500" />
-                  <h3 className="text-lg font-medium text-rose-500">{t('settings.security.resetTitle')}</h3>
+                  <h3 className="text-lg font-medium text-rose-700 dark:text-rose-400">{t('settings.security.resetTitle')}</h3>
                 </div>
                 <p className="text-sm text-muted mb-6">{t('settings.security.resetHint')}</p>
 
@@ -560,23 +691,41 @@ export default function Settings() {
                   {/* Ступень 1-2: настройки. Данные не затрагиваются, пароль не нужен. */}
                   <div className="flex flex-wrap gap-3">
                     <button
-                      onClick={() => { resetAppearance(); logSetting('reset', 'appearance'); }}
+                      onClick={() => { resetAppearance(); logSetting('reset', 'appearance'); notify.success(t('settings.security.appearanceReset')); }}
                       className="bg-surface-3 hover:bg-surface-hover border border-line text-secondary px-4 py-2.5 rounded-xl text-sm font-medium transition-colors"
                     >
                       {t('settings.security.resetAppearance')}
                     </button>
                     <button
-                      onClick={() => { resetSettings(); logSetting('reset', 'settings'); }}
+                      onClick={() => { resetSettings(); logSetting('reset', 'settings'); setGeneralDraft({ ...generalDraft }); notify.success(t('settings.security.settingsReset')); }}
                       className="bg-surface-3 hover:bg-surface-hover border border-line text-secondary px-4 py-2.5 rounded-xl text-sm font-medium transition-colors"
                     >
                       {t('settings.security.resetSettings')}
                     </button>
                   </div>
 
+                  {/* Ступень 2½: демонстрационные данные первого запуска. Своё не трогается. */}
+                  <div className="border-t border-line pt-6">
+                    <h4 className="text-sm font-semibold text-primary mb-2">{t('settings.demo.title')}</h4>
+                    <p className="text-xs text-muted mb-3">{demoPresent ? t('settings.demo.hint') : t('settings.demo.none')}</p>
+                    <button
+                      onClick={handleClearDemo}
+                      disabled={!demoPresent}
+                      className="bg-surface-3 hover:bg-surface-hover border border-line text-secondary disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2.5 rounded-xl text-sm font-medium transition-colors"
+                    >
+                      {t('settings.demo.button')}
+                    </button>
+                  </div>
+
+                  {!hasPassword && (
+                    <p className="text-xs text-muted border-t border-line pt-6">{t('settings.security.noPasswordHint')}</p>
+                  )}
+
                   {hasPassword && (
-                    <div>
-                      <label className="block text-sm font-medium mb-2 text-rose-400/80">{t('settings.security.adminPassword')}</label>
+                    <div className="border-t border-line pt-6">
+                      <label htmlFor="reset-password" className="block text-sm font-medium mb-2 text-rose-600 dark:text-rose-400">{t('settings.security.adminPassword')}</label>
                       <PasswordInput
+                        id="reset-password"
                         value={resetPassword}
                         onChange={(e) => setResetPassword(e.target.value)}
                         placeholder={t('settings.security.adminPasswordPlaceholder')}
@@ -590,11 +739,12 @@ export default function Settings() {
                   <div className="border-t border-line pt-6">
                     <h4 className="text-sm font-semibold text-primary mb-3">{t('settings.security.clearModules')}</h4>
                     <div className="flex flex-wrap gap-2 mb-4">
-                      {MODULE_TABLES.map(({ table, label }) => (
+                      {MODULE_TABLES.map(({ id, label }) => (
                         <button
-                          key={table}
-                          onClick={() => toggleModule(table)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${modulesToClear.includes(table) ? 'bg-rose-500/20 text-rose-400 border-rose-500/40' : 'bg-surface-3 text-muted border-line hover:bg-surface-hover'}`}
+                          key={id}
+                          aria-pressed={modulesToClear.includes(id)}
+                          onClick={() => toggleModule(id)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${modulesToClear.includes(id) ? 'bg-rose-500/20 text-rose-800 dark:text-rose-300 border-rose-500/40' : 'bg-surface-3 text-muted border-line hover:bg-surface-hover'}`}
                         >
                           {label}
                         </button>
@@ -602,8 +752,8 @@ export default function Settings() {
                     </div>
                     <button
                       onClick={handleClearModules}
-                      disabled={modulesToClear.length === 0 || !resetPassword}
-                      className="bg-rose-500/10 text-rose-500 border border-rose-500/20 hover:bg-rose-500/20 disabled:opacity-50 px-6 py-2.5 rounded-xl text-sm font-medium transition-colors"
+                      disabled={modulesToClear.length === 0 || !passwordConfirmed}
+                      className="bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500/20 hover:bg-rose-500/20 disabled:opacity-50 px-6 py-2.5 rounded-xl text-sm font-medium transition-colors"
                     >
                       {t('settings.security.clearBtn')}
                     </button>
@@ -611,19 +761,20 @@ export default function Settings() {
 
                   {/* Ступень 4: полный сброс. Пароль + фраза + предложение бэкапа. */}
                   <div className="border-t border-line pt-6">
-                    <h4 className="text-sm font-semibold text-rose-500 mb-3">{t('settings.security.factoryTitle')}</h4>
+                    <h4 className="text-sm font-semibold text-rose-700 dark:text-rose-400 mb-3">{t('settings.security.factoryTitle')}</h4>
                     <p className="text-xs text-muted mb-3">{t('settings.security.factoryHint', { phrase: FACTORY_PHRASE })}</p>
                     <input
                       type="text"
                       value={factoryPhrase}
+                      aria-label={t('settings.security.factoryTitle')}
                       onChange={(e) => setFactoryPhrase(e.target.value)}
                       placeholder={FACTORY_PHRASE}
                       className="w-full bg-input border border-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-rose-500 text-primary mb-4"
                     />
                   <button
                     onClick={handleFactoryReset}
-                    disabled={!resetPassword || factoryPhrase.trim() !== FACTORY_PHRASE}
-                    className="bg-rose-500/20 text-rose-500 border border-rose-500/30 hover:bg-rose-500/30 disabled:opacity-50 px-6 py-2.5 rounded-xl text-sm font-medium transition-colors"
+                    disabled={!passwordConfirmed || factoryPhrase.trim() !== FACTORY_PHRASE}
+                    className="bg-rose-500/20 text-rose-800 dark:text-rose-300 border border-rose-500/30 hover:bg-rose-500/30 disabled:opacity-50 px-6 py-2.5 rounded-xl text-sm font-medium transition-colors"
                   >
                     {t('settings.security.resetBtn')}
                   </button>
@@ -637,9 +788,6 @@ export default function Settings() {
                     <h3 className="text-xl font-bold">{t('settings.audit.title')}</h3>
                     <p className="text-sm text-muted">{t('settings.audit.subtitle')}</p>
                   </div>
-                  <button className="flex items-center gap-2 text-secondary hover:text-primary transition-colors text-sm font-medium">
-                    <Download className="w-4 h-4" /> {t('common.export')}
-                  </button>
                 </div>
 
                 <div className="bg-surface-2 border border-line rounded-2xl overflow-hidden">
@@ -647,6 +795,7 @@ export default function Settings() {
                     <div className="flex-1">
                       <label className="block text-xs font-medium text-muted mb-2">{t('settings.audit.actionType')}</label>
                       <select
+                        aria-label={t('settings.audit.actionType')}
                         value={auditAction}
                         onChange={(e) => setAuditAction(e.target.value)}
                         className="w-full bg-app border border-line rounded-xl px-4 py-2 text-sm focus:outline-none text-secondary"
@@ -658,6 +807,7 @@ export default function Settings() {
                     <div className="flex-1">
                       <label className="block text-xs font-medium text-muted mb-2">{t('settings.audit.entity')}</label>
                       <select
+                        aria-label={t('settings.audit.entity')}
                         value={auditEntity}
                         onChange={(e) => setAuditEntity(e.target.value)}
                         className="w-full bg-app border border-line rounded-xl px-4 py-2 text-sm focus:outline-none text-secondary"
@@ -670,6 +820,7 @@ export default function Settings() {
                       <label className="block text-xs font-medium text-muted mb-2">{t('settings.audit.dateFrom')}</label>
                       <input
                         type="date"
+                        aria-label={t('settings.audit.dateFrom')}
                         value={auditFrom}
                         onChange={(e) => setAuditFrom(e.target.value)}
                         className="w-full bg-app border border-line rounded-xl px-4 py-2 text-sm focus:outline-none text-secondary"
@@ -683,7 +834,7 @@ export default function Settings() {
                     </button>
                     <button
                       onClick={handleAuditExport}
-                      className="bg-accent-500/20 text-accent-400 border border-accent-500/30 hover:bg-accent-500/30 px-6 py-2 rounded-xl text-sm font-medium transition-colors h-[38px]"
+                      className="bg-accent-500/20 text-accent-700 dark:text-accent-300 border border-accent-500/30 hover:bg-accent-500/30 px-6 py-2 rounded-xl text-sm font-medium transition-colors h-[38px]"
                     >
                       {t('common.export')}
                     </button>
@@ -702,9 +853,10 @@ export default function Settings() {
                     <tbody>
                       {filteredAudit.slice(0, 200).map(a => (
                         <tr key={a.id} className="border-b border-line hover:bg-surface-hover">
-                          <td className="p-table text-table whitespace-nowrap">{a.ts.replace('T', ' ').slice(0, 19)}</td>
-                          {/* Приложение однопользовательское: действующее лицо — владелец устройства. */}
-                          <td className="p-table text-accent-400">{user?.name || t('user.owner')}</td>
+                          <td className="p-table text-table whitespace-nowrap tabular-nums">{dates.dateTime(a.ts, true)}</td>
+                          {/* Приложение однопользовательское: действующее лицо — владелец
+                              устройства. Неудачный вход владельцу не приписываем. */}
+                          <td className="p-table text-accent-700 dark:text-accent-300">{a.action === 'login_failed' ? '—' : (user?.name || t('user.owner'))}</td>
                           <td className="p-table text-table">{auditActionLabel(t, a.action)}</td>
                           <td className="p-table text-table">{auditEntityLabel(t, a.entity)}</td>
                           <td className="p-table font-mono text-xs">{a.diff || a.entityId || '—'}</td>
@@ -738,9 +890,9 @@ export default function Settings() {
                     <h4 className="text-lg font-medium">{t('settings.backup.createFull')}</h4>
                   </div>
                   <p className="text-sm text-muted">{t('settings.backup.manualInfo')}</p>
-                  <p className={`text-sm mt-2 ${backupIsStale ? 'text-amber-500' : 'text-muted'}`}>
+                  <p className={`text-sm mt-2 ${backupIsStale ? 'text-amber-700 dark:text-amber-400' : 'text-muted'}`}>
                     {lastBackup
-                      ? t('settings.backup.lastCopy', { date: lastBackup.replace('T', ' ').slice(0, 16) })
+                      ? t('settings.backup.lastCopy', { date: dates.dateTime(lastBackup) })
                       : t('settings.backup.neverCopied')}
                     {lastBackup && backupIsStale ? ' · ' + t('settings.backup.stale') : ''}
                   </p>
@@ -750,6 +902,7 @@ export default function Settings() {
                     type="file"
                     accept="application/json,.json"
                     ref={restoreInputRef}
+                    data-testid="restore-input"
                     onChange={handleRestoreFile}
                     className="hidden"
                   />
@@ -776,9 +929,7 @@ export default function Settings() {
                     <Database className="w-5 h-5 text-muted" />
                     <h4 className="text-lg font-medium">{t('settings.backup.available')}</h4>
                   </div>
-                  <button className="text-muted hover:text-secondary transition-colors">
-                    <RefreshCw className="w-4 h-4" />
-                  </button>
+
                 </div>
                 <div className="bg-surface-2 border border-line rounded-2xl overflow-hidden">
                   <table className="w-full text-sm text-left">
@@ -793,13 +944,13 @@ export default function Settings() {
                     <tbody>
                       {backups.map(b => (
                         <tr key={b.id} className="border-b border-line hover:bg-surface-hover">
-                          <td className="p-table text-accent-400">{b.fileName}</td>
-                          <td className="p-table text-table">{t('settings.backup.rows', { n: b.rows })}</td>
-                          <td className="p-table text-table">{b.createdAt.replace('T', ' ').slice(0, 19)}</td>
+                          <td className="p-table text-accent-700 dark:text-accent-300">{b.fileName}</td>
+                          <td className="p-table text-table tabular-nums">{t('settings.backup.rows', { count: b.rows })}</td>
+                          <td className="p-table text-table tabular-nums">{dates.dateTime(b.createdAt, true)}</td>
                           <td className="p-table text-right">
                             <button
                               onClick={() => removeFrom(TABLES.backups, b.id)}
-                              className="text-rose-400 hover:text-rose-300"
+                              className="text-rose-700 dark:text-rose-400 hover:text-rose-800 dark:hover:text-rose-300"
                             >
                               {t('common.delete')}
                             </button>
@@ -839,16 +990,17 @@ export default function Settings() {
                   {(['light', 'dark', 'system'] as const).map((tOpt) => (
                     <button
                       key={tOpt}
+                      aria-pressed={theme === tOpt}
                       onClick={() => { setTheme(tOpt); logSetting('theme', tOpt); }}
                       className={`relative p-6 rounded-2xl border flex flex-col items-center justify-center gap-3 transition-colors ${
                         theme === tOpt 
-                          ? 'border-accent-500 bg-accent-500/10 text-accent-400' 
+                          ? 'border-accent-500 bg-accent-500/10 text-accent-700 dark:text-accent-300' 
                           : 'border-line bg-surface-2 hover:bg-surface-hover text-muted'
                       }`}
                     >
                       {tOpt === 'light' ? <Sun className="w-6 h-6" /> : tOpt === 'dark' ? <Moon className="w-6 h-6" /> : <Monitor className="w-6 h-6" />}
                       <span className="text-sm font-medium">{tOpt === 'light' ? t('settings.light') : tOpt === 'dark' ? t('settings.dark') : t('settings.system')}</span>
-                      {theme === tOpt && <div className="absolute bottom-3"><Check className="w-4 h-4 text-accent-400" /></div>}
+                      {theme === tOpt && <div className="absolute bottom-3"><Check className="w-4 h-4 text-accent-600 dark:text-accent-400" /></div>}
                     </button>
                   ))}
                 </div>
@@ -871,7 +1023,8 @@ export default function Settings() {
                     return (
                       <div
                         key={color}
-                        {...clickable(() => { setAccentColor(color); logSetting('accentColor', color); }, color)}
+                        {...clickable(() => { setAccentColor(color); logSetting('accentColor', color); }, t(`settings.appearance.colors.${color}`))}
+                        aria-pressed={accentColor === color}
                         className={`w-8 h-8 rounded-full cursor-pointer hover:scale-110 transition-transform flex items-center justify-center text-white ${colorClasses} ${
                           accentColor === color ? 'ring-2 ring-offset-2 ring-offset-[var(--surface-2)]' : ''
                         }`}
@@ -890,17 +1043,18 @@ export default function Settings() {
                   {(['compact', 'standard', 'spacious'] as const).map(d => (
                     <div
                       key={d}
-                      {...clickable(() => { setDensity(d); logSetting('density', d); }, d)}
+                      {...clickable(() => { setDensity(d); logSetting('density', d); }, d === 'compact' ? t('settings.appearance.compact') : d === 'standard' ? t('settings.appearance.standard') : t('settings.appearance.spacious'))}
+                      aria-pressed={density === d}
                       className={`rounded-xl p-4 cursor-pointer transition-colors ${
                         density === d 
                           ? 'border border-accent-500 bg-accent-500/10' 
                           : 'border border-line bg-input hover:bg-surface-hover'
                       }`}
                     >
-                      <p className={`font-medium text-sm ${density === d ? 'text-accent-400' : 'text-primary'}`}>
+                      <p className={`font-medium text-sm ${density === d ? 'text-accent-700 dark:text-accent-300' : 'text-primary'}`}>
                         {d === 'compact' ? t('settings.appearance.compact') : d === 'standard' ? t('settings.appearance.standard') : t('settings.appearance.spacious')}
                       </p>
-                      <p className={`text-xs mt-1 ${density === d ? 'text-accent-400/70' : 'text-muted'}`}>
+                      <p className={`text-xs mt-1 ${density === d ? 'text-accent-700/80 dark:text-accent-300/80' : 'text-muted'}`}>
                         {d === 'compact' ? t('settings.appearance.compactHint') : d === 'standard' ? t('settings.appearance.standardHint') : t('settings.appearance.spaciousHint')}
                       </p>
                     </div>
@@ -911,24 +1065,27 @@ export default function Settings() {
               <div className="border border-line rounded-2xl p-6 bg-surface-2">
                 <h3 className="text-sm font-medium mb-6 text-primary">{t('settings.appearance.fontSize')}</h3>
                 <div className="flex items-center gap-4 px-2">
-                  <span className="text-xs font-medium text-muted cursor-pointer" {...clickable(() => { setFontSize('small'); logSetting('fontSize', 'small'); }, 'A')}>A</span>
+                  <span className="text-xs font-medium text-muted cursor-pointer" {...clickable(() => { setFontSize('small'); logSetting('fontSize', 'small'); }, t('settings.appearance.small'))}>A</span>
                   <div className="flex-1 relative h-2 bg-surface-3 rounded-full flex items-center">
                     <div className="absolute top-0 left-0 h-full bg-accent-500 rounded-full transition-all" style={{ width: fontSize === 'small' ? '0%' : fontSize === 'standard' ? '50%' : '100%' }}></div>
                     
                     <div
-                      {...clickable(() => { setFontSize('small'); logSetting('fontSize', 'small'); }, 'small')}
+                      {...clickable(() => { setFontSize('small'); logSetting('fontSize', 'small'); }, t('settings.appearance.small14'))}
+                      aria-pressed={fontSize === 'small'}
                       className={`absolute left-0 w-4 h-4 rounded-full cursor-pointer -translate-x-1/2 ${fontSize === 'small' ? 'bg-accent-400 ring-4 ring-accent-500/30 shadow-sm' : 'bg-transparent'}`}
                     ></div>
                     <div
-                      {...clickable(() => { setFontSize('standard'); logSetting('fontSize', 'standard'); }, 'standard')}
+                      {...clickable(() => { setFontSize('standard'); logSetting('fontSize', 'standard'); }, t('settings.appearance.standard16'))}
+                      aria-pressed={fontSize === 'standard'}
                       className={`absolute left-1/2 w-4 h-4 rounded-full cursor-pointer -translate-x-1/2 ${fontSize === 'standard' ? 'bg-accent-400 ring-4 ring-accent-500/30 shadow-sm' : 'bg-transparent'}`}
                     ></div>
                     <div
-                      {...clickable(() => { setFontSize('large'); logSetting('fontSize', 'large'); }, 'large')}
+                      {...clickable(() => { setFontSize('large'); logSetting('fontSize', 'large'); }, t('settings.appearance.large18'))}
+                      aria-pressed={fontSize === 'large'}
                       className={`absolute left-full w-4 h-4 rounded-full cursor-pointer -translate-x-1/2 ${fontSize === 'large' ? 'bg-accent-400 ring-4 ring-accent-500/30 shadow-sm' : 'bg-transparent'}`}
                     ></div>
                   </div>
-                  <span className="text-lg font-medium text-muted cursor-pointer" {...clickable(() => { setFontSize('large'); logSetting('fontSize', 'large'); }, 'A')}>A</span>
+                  <span className="text-lg font-medium text-muted cursor-pointer" {...clickable(() => { setFontSize('large'); logSetting('fontSize', 'large'); }, t('settings.appearance.large'))}>A</span>
                 </div>
                 <div className="flex justify-between mt-3 px-2">
                   <span className="text-xs text-muted">{t('settings.appearance.small')}</span>

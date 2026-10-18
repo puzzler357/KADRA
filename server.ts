@@ -8,7 +8,9 @@ import jwt from 'jsonwebtoken';
 import { createServer as createViteServer } from 'vite';
 import db, { RESETTABLE_TABLES } from './src/db/sqlite';
 import { ENTITIES, ENTITY_BY_TABLE, AUDIT_TABLE, BACKUP_TABLES, insertSql, selectSql, updateSql, rowToObject, objectToValues } from './src/data/entities';
-import { employeePatchFor, employeeUpdate } from './src/data/movements';
+import { employeePatchFor, employeeUpdate, movementError, movementRecord } from './src/data/movements';
+import { demoCleanupStatements } from './src/data/demo';
+import { employeeErrors, departmentNameError, parentError, positionErrors, hasErrors, templateError } from './src/lib/validation';
 
 export const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -110,130 +112,211 @@ function audit(action: string, entity: string, entityId?: string | null, diff?: 
   );
 }
 
-// API Auth
-// Состояние учётной записи. Её может не быть вовсе: приложение открывается
-// и без неё. Пустой password_hash означает «пароль не задан» — тогда экраны
-// не просят ни ввода, ни подтверждения.
-app.get('/api/auth/status', (_req, res) => {
-  const owner = db.prepare('SELECT password_hash FROM users ORDER BY id LIMIT 1').get() as
-    { password_hash: string } | undefined;
-  res.json({ hasOwner: Boolean(owner), hasPassword: Boolean(owner?.password_hash) });
-});
-
-// Владелец без проверки пароля. Нужен для входа, когда пароль при входе
-// выключен: учётная запись всё равно одна и лежит на этом же устройстве.
-app.get('/api/auth/owner', (_req, res) => {
-  const user = db.prepare("SELECT id, email, name, role FROM users ORDER BY id LIMIT 1").get() as any;
-  if (!user) return res.json({ user: null });
-  const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({ user, token });
-});
-
-// Завести или поправить учётную запись владельца. Запрос один на оба
-// случая: строка в таблице всегда одна, и «создать» от «переименовать»
-// отличается только тем, была ли она до этого.
+// ---- Учётная запись владельца ----
 //
-// Приложение больше не требует учётной записи на старте — она заводится в
-// профиле и только если владельцу зачем-то понадобилась. Пароля здесь нет:
-// он добавляется отдельно, тоже по желанию.
+// Учётная запись одна, и её может не быть вовсе: приложение открывается и без
+// неё. Пустой password_hash — пароль не задан. require_password — владелец сам
+// включил запрос пароля при входе; хранится в базе, а не в браузере, поэтому
+// очистка данных браузера его не выключает.
+
+interface OwnerRow {
+  id: string;
+  email: string;
+  password_hash: string;
+  role: string;
+  name: string;
+  require_password: number;
+}
+
+const getOwner = (): OwnerRow | undefined =>
+  db.prepare('SELECT * FROM users ORDER BY id LIMIT 1').get() as OwnerRow | undefined;
+
+/** Пароль при входе действует: он задан и владелец включил запрос. */
+const passwordRequired = (owner: OwnerRow | undefined): boolean =>
+  Boolean(owner?.password_hash) && Boolean(owner?.require_password);
+
+const publicUser = (u: OwnerRow) => ({ id: u.id, email: u.email, name: u.name, role: u.role });
+const signToken = (u: { id: string; role: string }) => jwt.sign({ id: u.id, role: u.role }, JWT_SECRET, { expiresIn: '7d' });
+
+/** Ответ-ошибка с кодом: текст на нужном языке подставляет клиент. */
+function fail(res: Response, status: number, code: string, error: string, extra: Record<string, unknown> = {}) {
+  return res.status(status).json({ error, code, ...extra });
+}
+
+/**
+ * Логин подходит, если он пуст (владелец один, спрашивать его незачем) или
+ * совпадает с email либо именем владельца. Раньше вход шёл только по email,
+ * и учётная запись, заведённая с одним именем, запиралась насовсем.
+ */
+function loginMatches(owner: OwnerRow, login: unknown): boolean {
+  const value = String(login ?? '').trim().toLocaleLowerCase('ru');
+  if (!value) return true;
+  return value === String(owner.email ?? '').trim().toLocaleLowerCase('ru')
+    || value === String(owner.name ?? '').trim().toLocaleLowerCase('ru');
+}
+
+/** Пароль администратора для опасных операций — только если он задан. */
+function adminPasswordOk(adminPassword: unknown): boolean {
+  const owner = getOwner();
+  return !owner?.password_hash || bcrypt.compareSync(String(adminPassword ?? ''), owner.password_hash);
+}
+
+// Когда пароль при входе включён, данные отдаются только по токену сессии.
+// Без этого запрос пароля был бы лишь экраном поверх открытого API.
+const OPEN_ROUTES = new Set(['GET /api/auth/status', 'POST /api/auth/login']);
+
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api/') || OPEN_ROUTES.has(`${req.method} ${req.path}`)) return next();
+  if (!passwordRequired(getOwner())) return next();
+  const header = req.headers.authorization ?? '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+  try {
+    jwt.verify(token, JWT_SECRET);
+    return next();
+  } catch {
+    return fail(res, 401, 'auth.sessionRequired', 'Требуется вход по паролю');
+  }
+});
+
+app.get('/api/auth/status', (_req, res) => {
+  const owner = getOwner();
+  res.json({
+    hasOwner: Boolean(owner),
+    hasPassword: Boolean(owner?.password_hash),
+    requirePassword: passwordRequired(owner),
+    ownerName: owner?.name ?? null,
+  });
+});
+
+// Владелец без ввода пароля — когда запрос пароля выключен. Когда включён,
+// сюда без токена не пустит проверка сессии выше.
+app.get('/api/auth/owner', (_req, res) => {
+  const owner = getOwner();
+  if (!owner) return res.json({ user: null });
+  res.json({ user: publicUser(owner), token: signToken(owner) });
+});
+
+// Завести или поправить учётную запись. Строка в таблице всегда одна, и
+// «создать» от «переименовать» отличается только тем, была ли она до этого.
 app.post('/api/auth/owner', (req, res) => {
   const { name, email } = req.body ?? {};
   const cleanName = String(name ?? '').trim();
   const cleanEmail = String(email ?? '').trim();
 
   if (!cleanName && !cleanEmail) {
-    return res.status(400).json({ error: 'Нужно имя или email' });
+    return fail(res, 400, 'auth.ownerRequired', 'Нужно имя или email');
   }
 
-  const existing = db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get() as { id: string } | undefined;
+  const existing = getOwner();
   const id = existing?.id ?? '1';
   const displayName = cleanName || cleanEmail;
 
   if (existing) {
     db.prepare('UPDATE users SET name = ?, email = ? WHERE id = ?').run(displayName, cleanEmail, id);
-    audit('owner_update', 'auth', id, cleanEmail);
+    audit('owner_update', 'auth', id, cleanEmail || displayName);
   } else {
     // Пустой password_hash — пароль не задан.
     db.prepare('INSERT INTO users (id, email, password_hash, role, name) VALUES (?, ?, ?, ?, ?)')
       .run(id, cleanEmail, '', 'ADMIN', displayName);
-    audit('owner_create', 'auth', id, cleanEmail);
+    audit('owner_create', 'auth', id, cleanEmail || displayName);
   }
 
-  const token = jwt.sign({ id, role: 'ADMIN' }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({ user: { id, email: cleanEmail, name: displayName, role: 'ADMIN' }, token });
+  res.json({ user: { id, email: cleanEmail, name: displayName, role: 'ADMIN' }, token: signToken({ id, role: 'ADMIN' }) });
 });
 
 app.post('/api/auth/login', (req, res) => {
-  const { email, password } = req.body;
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email) as any;
-  
+  const { password } = req.body ?? {};
+  const login = req.body?.login ?? req.body?.email;
+  const owner = getOwner();
+
   // Пустой хэш — пароль не задан: входить по паролю не через что, и ни одна
-  // строка к нему не подойдёт, bcrypt сравнивает с пустым хэшем как false.
-  if (!user || !user.password_hash || !bcrypt.compareSync(String(password ?? ''), user.password_hash)) {
-    audit('login_failed', 'auth', null, String(email ?? ''));
-    return res.status(401).json({ error: 'Неверный email или пароль' });
+  // строка к нему не подойдёт.
+  if (!owner || !owner.password_hash || !loginMatches(owner, login)
+    || !bcrypt.compareSync(String(password ?? ''), owner.password_hash)) {
+    audit('login_failed', 'auth', null, String(login ?? ''));
+    return fail(res, 401, 'auth.invalid', 'Неверный пароль');
   }
 
-  audit('login', 'auth', user.id, user.email);
-  const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({ user: { id: user.id, email: user.email, name: user.name, role: user.role }, token });
+  audit('login', 'auth', owner.id, owner.email || owner.name);
+  res.json({ user: publicUser(owner), token: signToken(owner) });
 });
 
 app.post('/api/auth/change-password', (req, res) => {
-  const { email, currentPassword, newPassword } = req.body;
-  
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email) as any;
+  const { email, currentPassword, newPassword } = req.body ?? {};
+  const owner = getOwner();
+
   // Пароля ещё нет — подтверждать нечем, форма задаёт первый.
-  if (!user || (user.password_hash && !bcrypt.compareSync(String(currentPassword ?? ''), user.password_hash))) {
-    return res.status(401).json({ error: 'Неверный текущий пароль' });
+  if (!owner || !loginMatches(owner, email)
+    || (owner.password_hash && !bcrypt.compareSync(String(currentPassword ?? ''), owner.password_hash))) {
+    return fail(res, 401, 'auth.invalidCurrent', 'Неверный текущий пароль');
   }
-  
-  audit('password_change', 'auth', user.id, user.email);
-  const newHash = bcrypt.hashSync(newPassword, 10);
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(newHash, user.id);
-  
+  if (String(newPassword ?? '').length < 6) {
+    return fail(res, 400, 'auth.tooShort', 'Пароль должен быть не менее 6 символов');
+  }
+
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(String(newPassword), 10), owner.id);
+  audit('password_change', 'auth', owner.id, owner.email || owner.name);
   res.json({ success: true });
 });
 
-// Снять пароль: учётная запись остаётся, password_hash снова пустой, и
-// приложение открывается сразу. Текущий пароль спрашиваем — иначе снять его
-// мог бы любой, кто подошёл к открытому приложению.
+// Снять пароль: учётная запись остаётся, приложение снова открывается сразу.
+// Текущий пароль спрашиваем — иначе снять его мог бы любой, кто подошёл к
+// открытому приложению. Запрос пароля при входе выключается заодно.
 app.post('/api/auth/remove-password', (req, res) => {
   const { email, currentPassword } = req.body ?? {};
-
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email) as any;
-  if (!user) return res.status(401).json({ error: 'Неверный текущий пароль' });
-  if (user.password_hash && !bcrypt.compareSync(String(currentPassword ?? ''), user.password_hash)) {
-    return res.status(401).json({ error: 'Неверный текущий пароль' });
+  const owner = getOwner();
+  if (!owner || !loginMatches(owner, email)
+    || (owner.password_hash && !bcrypt.compareSync(String(currentPassword ?? ''), owner.password_hash))) {
+    return fail(res, 401, 'auth.invalidCurrent', 'Неверный текущий пароль');
   }
 
-  db.prepare("UPDATE users SET password_hash = '' WHERE id = ?").run(user.id);
-  audit('password_remove', 'auth', user.id, user.email);
-
+  db.prepare("UPDATE users SET password_hash = '', require_password = 0 WHERE id = ?").run(owner.id);
+  audit('password_remove', 'auth', owner.id, owner.email || owner.name);
   res.json({ success: true });
 });
 
+// Включить или выключить запрос пароля при входе. Включить можно только
+// заданный пароль: иначе владелец запер бы себя снаружи.
+app.post('/api/auth/require-password', (req, res) => {
+  const enabled = Boolean(req.body?.enabled);
+  const owner = getOwner();
+  if (!owner) return fail(res, 400, 'auth.ownerRequired', 'Нужно имя или email');
+  if (enabled && !owner.password_hash) return fail(res, 400, 'auth.noPassword', 'Сначала задайте пароль');
+
+  db.prepare('UPDATE users SET require_password = ? WHERE id = ?').run(enabled ? 1 : 0, owner.id);
+  audit('settings', 'auth', owner.id, `requirePassword: ${enabled}`);
+  res.json({ requirePassword: enabled });
+});
+
+// Полный сброс: все таблицы данных одной транзакцией. Учётная запись
+// владельца в список не входит и переживает сброс.
 app.post('/api/auth/reset-system', (req, res) => {
-  const { adminPassword } = req.body;
-  
-  const admin = db.prepare('SELECT * FROM users WHERE role = ?').get('ADMIN') as any;
-  // Учётной записи может не быть вовсе, а у заведённой — пароля. Тогда
-  // сверять нечего, и ступенью защиты остаётся подтверждение в интерфейсе.
-  if (admin?.password_hash && !bcrypt.compareSync(String(adminPassword ?? ''), admin.password_hash)) {
-    return res.status(401).json({ error: 'Неверный пароль администратора' });
+  if (!adminPasswordOk(req.body?.adminPassword)) {
+    return fail(res, 401, 'auth.invalidAdmin', 'Неверный пароль администратора');
   }
-  
-  // Чистим все таблицы данных одной транзакцией; учётная запись владельца
-  // в список не входит и переживает сброс.
+
   db.transaction(() => {
     for (const table of RESETTABLE_TABLES) {
       db.prepare(`DELETE FROM ${table}`).run();
     }
   })();
 
-  
   audit('reset', 'system', null, RESETTABLE_TABLES.join(', '));
-  res.json({ success: true, message: 'Все данные системы были успешно сброшены' });
+  res.json({ success: true });
+});
+
+// Удаление демонстрационных данных: ровно то, что засеял первый запуск,
+// и то, что успели привязать к демо-сотрудникам. Своё не трогается.
+app.post('/api/demo/clear', (_req, res) => {
+  const statements = demoCleanupStatements();
+  let removed = 0;
+  db.transaction(() => {
+    for (const { sql, params } of statements) {
+      removed += db.prepare(sql).run(...params).changes;
+    }
+  })();
+  audit('demo_clear', 'system', null, String(removed));
+  res.json({ removed });
 });
 
 // Маршруты для таблиц, описанных в src/data/entities.ts: подбор, отпуска,
@@ -276,20 +359,19 @@ for (const entity of ENTITIES) {
 app.post('/api/movements/apply', (req, res) => {
   const movement = req.body;
   if (!movement?.employeeId || !movement?.type || !movement?.date) {
-    return res.status(400).json({ error: 'Нужны employeeId, type и date' });
+    return fail(res, 400, 'mov.fieldsRequired', 'Нужны сотрудник, тип и дата операции');
   }
 
-  const employee = db.prepare('SELECT * FROM employees WHERE id = ?').get(movement.employeeId) as any;
-  if (!employee) return res.status(404).json({ error: 'Сотрудник не найден' });
+  const row = db.prepare('SELECT * FROM employees WHERE id = ?').get(movement.employeeId) as any;
+  if (!row) return fail(res, 404, 'emp.notFound', 'Сотрудник не найден');
+  const employee = employeeFromRow(row);
+
+  const invalid = movementError(movement, employee);
+  if (invalid) return fail(res, 400, invalid, 'Операцию провести нельзя');
 
   // Прежние значения фиксируются на сервере, а не приходят от клиента:
   // иначе в истории осело бы то, что было открыто в форме, а не в базе.
-  const record = {
-    ...movement,
-    fromPosition: employee.position,
-    fromDepartment: employee.department,
-    fromSalary: employee.salary ?? 0,
-  };
+  const record = movementRecord(movement, employee);
 
   const entity = ENTITY_BY_TABLE.get('movements')!;
   const id = movement.id || makeId();
@@ -312,15 +394,14 @@ app.post('/api/movements/apply', (req, res) => {
 app.post('/api/reset/tables', (req, res) => {
   const { adminPassword, tables } = req.body ?? {};
 
-  const admin = db.prepare('SELECT * FROM users WHERE role = ?').get('ADMIN') as any;
-  // Учётной записи может не быть вовсе, а у заведённой — пароля. Тогда
-  // сверять нечего, и ступенью защиты остаётся подтверждение в интерфейсе.
-  if (admin?.password_hash && !bcrypt.compareSync(String(adminPassword ?? ''), admin.password_hash)) {
-    return res.status(401).json({ error: 'Неверный пароль администратора' });
+  // Пароля может не быть вовсе — тогда сверять нечего, и ступенью защиты
+  // остаётся подтверждение в интерфейсе.
+  if (!adminPasswordOk(adminPassword)) {
+    return fail(res, 401, 'auth.invalidAdmin', 'Неверный пароль администратора');
   }
 
   const requested = Array.isArray(tables) ? tables.filter((t: string) => BACKUP_TABLES.includes(t)) : [];
-  if (requested.length === 0) return res.status(400).json({ error: 'Не выбрано ни одной известной таблицы' });
+  if (requested.length === 0) return fail(res, 400, 'reset.noTables', 'Не выбрано ни одной известной таблицы');
 
   db.transaction(() => {
     for (const table of requested) db.prepare(`DELETE FROM ${table}`).run();
@@ -388,46 +469,76 @@ app.post('/api/backup/restore', (req, res) => {
 });
 
 // API Employees
+const employeeFromRow = (e: any) => ({
+  id: e.id,
+  fullName: e.full_name,
+  position: e.position,
+  department: e.department,
+  status: e.status,
+  hireDate: e.hire_date,
+  tabNumber: e.tab_number ?? undefined,
+  birthDate: e.birth_date ?? undefined,
+  paymentType: e.payment_type || 'salary',
+  salary: e.salary || 0,
+  rate: e.rate || 1,
+  dismissalDate: e.dismissal_date ?? null,
+});
+
 app.get('/api/employees', (_req, res) => {
-  const employees = db.prepare('SELECT * FROM employees').all().map((e: any) => ({
-    id: e.id,
-    fullName: e.full_name,
-    position: e.position,
-    department: e.department,
-    status: e.status,
-    hireDate: e.hire_date,
-    tabNumber: e.tab_number ?? undefined,
-    birthDate: e.birth_date,
-    paymentType: e.payment_type || 'salary',
-    salary: e.salary || 0,
-    rate: e.rate || 1
-  }));
-  res.json(employees);
+  res.json(db.prepare('SELECT * FROM employees').all().map(employeeFromRow));
 });
 
 const insertEmployee = () => db.prepare(
-  'INSERT INTO employees (id, full_name, position, department, status, hire_date, tab_number, birth_date, payment_type, salary, rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  'INSERT INTO employees (id, full_name, position, department, status, hire_date, tab_number, birth_date, payment_type, salary, rate, dismissal_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
 );
 
+/** Значения по умолчанию для необязательных полей карточки. */
+const withEmployeeDefaults = (e: any) => ({
+  ...e,
+  tabNumber: e.tabNumber || null,
+  birthDate: e.birthDate || null,
+  paymentType: e.paymentType ?? 'salary',
+  salary: e.salary ?? 0,
+  rate: e.rate ?? 1,
+  dismissalDate: e.dismissalDate || null,
+});
+
+const employeeParams = (id: string, e: any) => [
+  id, String(e.fullName).trim(), String(e.position).trim(), String(e.department).trim(), e.status, e.hireDate,
+  e.tabNumber, e.birthDate, e.paymentType, Number(e.salary), Number(e.rate), e.dismissalDate,
+];
+
 app.post('/api/employees', (req, res) => {
-  const { id, fullName, position, department, status, hireDate, tabNumber, birthDate, paymentType = 'salary', salary = 0, rate = 1 } = req.body;
-  const newId = id || makeId();
-  insertEmployee().run(newId, fullName, position, department, status, hireDate, tabNumber ?? null, birthDate, paymentType, salary, rate);
-  audit('create', 'employees', newId, fullName);
+  const employee = withEmployeeDefaults(req.body ?? {});
+  const errors = employeeErrors(employee);
+  if (hasErrors(errors)) return fail(res, 400, 'emp.validation', 'Проверьте заполнение карточки', { fields: errors });
+
+  const newId = employee.id || makeId();
+  insertEmployee().run(...employeeParams(newId, employee));
+  audit('create', 'employees', newId, employee.fullName);
   res.json({ id: newId });
 });
 
 // Массовая вставка для импорта из Excel: одна транзакция на весь файл.
+// Строки проверяются заранее — файл импортируется целиком либо никак.
 app.post('/api/employees/bulk', (req, res) => {
   const rows = Array.isArray(req.body?.employees) ? req.body.employees : null;
-  if (!rows) return res.status(400).json({ error: 'Ожидался массив employees' });
+  if (!rows) return fail(res, 400, 'emp.bulkShape', 'Ожидался массив employees');
+
+  const prepared = rows.map(withEmployeeDefaults);
+  const invalid = prepared
+    .map((e: any, index: number) => ({ index, errors: employeeErrors(e) }))
+    .filter((r: { errors: object }) => hasErrors(r.errors));
+  if (invalid.length > 0) {
+    return fail(res, 400, 'emp.validation', 'Проверьте заполнение карточки', { rows: invalid.slice(0, 50) });
+  }
 
   const stmt = insertEmployee();
   const ids: string[] = [];
   db.transaction(() => {
-    for (const e of rows) {
+    for (const e of prepared) {
       const newId = e.id || makeId();
-      stmt.run(newId, e.fullName, e.position, e.department, e.status, e.hireDate, e.tabNumber ?? null, e.birthDate ?? null, e.paymentType ?? 'salary', e.salary ?? 0, e.rate ?? 1);
+      stmt.run(...employeeParams(newId, e));
       ids.push(newId);
     }
   })();
@@ -436,68 +547,167 @@ app.post('/api/employees/bulk', (req, res) => {
   res.json({ ids });
 });
 
+// Обновление поверх текущей строки: переданные поля меняются, остальные
+// остаются. Раньше непереданное поле молча превращалось в NULL.
 app.put('/api/employees/:id', (req, res) => {
-  const { fullName, position, department, status, hireDate, tabNumber, birthDate, paymentType, salary, rate } = req.body;
-  db.prepare('UPDATE employees SET full_name = ?, position = ?, department = ?, status = ?, hire_date = ?, tab_number = ?, birth_date = ?, payment_type = ?, salary = ?, rate = ? WHERE id = ?')
-    .run(fullName, position, department, status, hireDate, tabNumber ?? null, birthDate, paymentType, salary, rate, req.params.id);
-  audit('update', 'employees', req.params.id, fullName);
+  const row = db.prepare('SELECT * FROM employees WHERE id = ?').get(req.params.id);
+  if (!row) return fail(res, 404, 'emp.notFound', 'Сотрудник не найден');
+
+  const merged = withEmployeeDefaults({ ...employeeFromRow(row), ...req.body });
+  const errors = employeeErrors(merged);
+  if (hasErrors(errors)) return fail(res, 400, 'emp.validation', 'Проверьте заполнение карточки', { fields: errors });
+
+  const [, ...values] = employeeParams(req.params.id, merged);
+  db.prepare('UPDATE employees SET full_name = ?, position = ?, department = ?, status = ?, hire_date = ?, tab_number = ?, birth_date = ?, payment_type = ?, salary = ?, rate = ?, dismissal_date = ? WHERE id = ?')
+    .run(...values, req.params.id);
+  audit('update', 'employees', req.params.id, merged.fullName);
   res.json({ success: true });
 });
 
 app.delete('/api/employees/:id', (req, res) => {
+  const row = db.prepare('SELECT full_name FROM employees WHERE id = ?').get(req.params.id) as { full_name: string } | undefined;
   db.prepare('DELETE FROM employees WHERE id = ?').run(req.params.id);
-  audit('delete', 'employees', req.params.id, null);
+  audit('delete', 'employees', req.params.id, row?.full_name ?? null);
   res.json({ success: true });
 });
 
 // API Departments
+const listDepartmentRows = () => db.prepare('SELECT * FROM departments').all().map((d: any) => ({
+  id: d.id, name: d.name, parentId: d.parent_id,
+}));
+
 app.get('/api/departments', (_req, res) => {
-  const deps = db.prepare('SELECT * FROM departments').all().map((d: any) => ({
-    id: d.id, name: d.name, parentId: d.parent_id
-  }));
-  res.json(deps);
+  res.json(listDepartmentRows());
 });
 app.post('/api/departments', (req, res) => {
-  const { id, name, parentId } = req.body;
+  const { id, name, parentId } = req.body ?? {};
+  const departments = listDepartmentRows();
+  const nameError = departmentNameError(String(name ?? ''), departments);
+  if (nameError) return fail(res, 400, nameError, 'Проверьте название подразделения');
+  const parent = parentId || null;
+  // Ссылка на несуществующего родителя допустима только для старых данных;
+  // новое подразделение кладётся либо в корень, либо в настоящий узел.
+  if (parent && !departments.some((d) => d.id === parent)) return fail(res, 400, 'org.parentMissing', 'Родительское подразделение не найдено');
+
   const newId = id || makeId();
-  db.prepare('INSERT INTO departments (id, name, parent_id) VALUES (?, ?, ?)').run(newId, name, parentId || null);
-  audit('create', 'departments', newId, name);
+  db.prepare('INSERT INTO departments (id, name, parent_id) VALUES (?, ?, ?)').run(newId, String(name).trim(), parent);
+  audit('create', 'departments', newId, String(name).trim());
   res.json({ id: newId });
 });
 app.put('/api/departments/:id', (req, res) => {
-  db.prepare('UPDATE departments SET name = ?, parent_id = ? WHERE id = ?').run(req.body.name, req.body.parentId || null, req.params.id);
-  audit('update', 'departments', req.params.id, req.body.name);
-  res.json({ success: true });
+  const departments = listDepartmentRows();
+  const current = departments.find((d) => d.id === req.params.id);
+  if (!current) return fail(res, 404, 'org.notFound', 'Подразделение не найдено');
+
+  const body = req.body ?? {};
+  const name = body.name !== undefined ? String(body.name) : current.name;
+  // Отсутствие поля — родитель прежний; явный null — корень.
+  const parent = 'parentId' in body ? (body.parentId || null) : current.parentId;
+
+  const nameError = departmentNameError(name, departments, current.id);
+  if (nameError) return fail(res, 400, nameError, 'Проверьте название подразделения');
+  const cycle = parentError(departments, current.id, parent);
+  if (cycle) return fail(res, 400, cycle, 'Нельзя выбрать такое родительское подразделение');
+
+  // Сотрудники ссылаются на подразделение по названию, поэтому
+  // переименование проходит по их карточкам той же транзакцией — иначе люди
+  // «выпали» бы из штатного расписания.
+  const newName = name.trim();
+  let renamedEmployees = 0;
+  db.transaction(() => {
+    db.prepare('UPDATE departments SET name = ?, parent_id = ? WHERE id = ?').run(newName, parent, current.id);
+    if (newName !== current.name) {
+      renamedEmployees = db.prepare('UPDATE employees SET department = ? WHERE department = ?').run(newName, current.name).changes;
+    }
+  })();
+  audit('update', 'departments', current.id, newName);
+  res.json({ success: true, renamedEmployees });
 });
+// Удаление подразделения вместе с его должностями. Вложенные подразделения
+// не удаляются каскадом: их сначала переносят или удаляют явно — молча
+// стереть полдерева одним щелчком слишком дорого.
 app.delete('/api/departments/:id', (req, res) => {
-  db.prepare('DELETE FROM departments WHERE id = ?').run(req.params.id);
-  audit('delete', 'departments', req.params.id, null);
-  res.json({ success: true });
+  const departments = listDepartmentRows();
+  const current = departments.find((d) => d.id === req.params.id);
+  if (!current) return res.json({ success: true, deletedPositions: 0 });
+  if (departments.some((d) => d.parentId === current.id)) {
+    return fail(res, 409, 'org.hasChildren', 'Сначала удалите или перенесите вложенные подразделения');
+  }
+  // Работающие сотрудники остались бы с подразделением, которого нет.
+  const staff = (db.prepare("SELECT count(*) AS c FROM employees WHERE department = ? AND status != 'dismissed'").get(current.name) as { c: number }).c;
+  if (staff > 0) {
+    return fail(res, 409, 'org.hasEmployees', 'В подразделении числятся сотрудники', { count: staff });
+  }
+
+  let deletedPositions = 0;
+  db.transaction(() => {
+    deletedPositions = db.prepare('DELETE FROM positions WHERE department_id = ?').run(current.id).changes;
+    db.prepare('DELETE FROM departments WHERE id = ?').run(current.id);
+  })();
+  audit('delete', 'departments', current.id, current.name);
+  res.json({ success: true, deletedPositions });
 });
 
 // API Positions
-app.get('/api/positions', (_req, res) => {
-  const pos = db.prepare('SELECT * FROM positions').all().map((p: any) => ({
-    id: p.id, departmentId: p.department_id, title: p.title, maxCount: p.max_count, salary: p.salary
-  }));
-  res.json(pos);
+const positionFromRow = (p: any) => ({
+  id: p.id, departmentId: p.department_id, title: p.title, maxCount: p.max_count, salary: p.salary,
 });
+
+app.get('/api/positions', (_req, res) => {
+  res.json(db.prepare('SELECT * FROM positions').all().map(positionFromRow));
+});
+
+function checkPosition(res: Response, draft: any, excludeId?: string): boolean {
+  if (!draft.departmentId || !db.prepare('SELECT 1 FROM departments WHERE id = ?').get(draft.departmentId)) {
+    fail(res, 400, 'pos.departmentMissing', 'Подразделение не найдено');
+    return false;
+  }
+  const siblings = db.prepare('SELECT * FROM positions WHERE department_id = ?').all(draft.departmentId).map(positionFromRow);
+  const errors = positionErrors(draft, siblings, excludeId);
+  if (hasErrors(errors)) {
+    fail(res, 400, Object.values(errors)[0] as string, 'Проверьте заполнение должности', { fields: errors });
+    return false;
+  }
+  return true;
+}
+
 app.post('/api/positions', (req, res) => {
-  const { id, departmentId, title, maxCount, salary } = req.body;
+  const { id, departmentId, title, maxCount, salary } = req.body ?? {};
+  const draft = { departmentId, title: String(title ?? ''), maxCount, salary: salary ?? '' };
+  if (!checkPosition(res, draft)) return;
+
   const newId = id || makeId();
-  db.prepare('INSERT INTO positions (id, department_id, title, max_count, salary) VALUES (?, ?, ?, ?, ?)').run(newId, departmentId, title, maxCount, salary);
-  audit('create', 'positions', newId, title);
+  db.prepare('INSERT INTO positions (id, department_id, title, max_count, salary) VALUES (?, ?, ?, ?, ?)')
+    .run(newId, departmentId, draft.title.trim(), Number(maxCount), Number(salary));
+  audit('create', 'positions', newId, draft.title.trim());
   res.json({ id: newId });
 });
 app.put('/api/positions/:id', (req, res) => {
-  const { departmentId, title, maxCount, salary } = req.body;
-  db.prepare('UPDATE positions SET department_id = ?, title = ?, max_count = ?, salary = ? WHERE id = ?').run(departmentId, title, maxCount, salary, req.params.id);
+  const row = db.prepare('SELECT * FROM positions WHERE id = ?').get(req.params.id);
+  if (!row) return fail(res, 404, 'pos.notFound', 'Должность не найдена');
+  const merged = { ...positionFromRow(row), ...req.body };
+  if (!checkPosition(res, merged, req.params.id)) return;
+
+  const before = positionFromRow(row);
+  const title = String(merged.title).trim();
+  let renamedEmployees = 0;
+  db.transaction(() => {
+    db.prepare('UPDATE positions SET department_id = ?, title = ?, max_count = ?, salary = ? WHERE id = ?')
+      .run(merged.departmentId, title, Number(merged.maxCount), Number(merged.salary), req.params.id);
+    // Переименование должности проходит по карточкам её подразделения.
+    if (title !== before.title && merged.departmentId === before.departmentId) {
+      renamedEmployees = db.prepare(
+        'UPDATE employees SET position = ? WHERE position = ? AND department = (SELECT name FROM departments WHERE id = ?)',
+      ).run(title, before.title, before.departmentId).changes;
+    }
+  })();
   audit('update', 'positions', req.params.id, title);
-  res.json({ success: true });
+  res.json({ success: true, renamedEmployees });
 });
 app.delete('/api/positions/:id', (req, res) => {
+  const row = db.prepare('SELECT title FROM positions WHERE id = ?').get(req.params.id) as { title: string } | undefined;
   db.prepare('DELETE FROM positions WHERE id = ?').run(req.params.id);
-  audit('delete', 'positions', req.params.id, null);
+  audit('delete', 'positions', req.params.id, row?.title ?? null);
   res.json({ success: true });
 });
 
@@ -511,20 +721,34 @@ app.get('/api/templates', (_req, res) => {
   res.json(templates);
 });
 
+const TEMPLATE_ERRORS: Record<string, string> = {
+  'tpl.nameRequired': 'Укажите название шаблона',
+  'tpl.nameTooLong': 'Название шаблона длиннее 200 символов',
+  'tpl.blocksInvalid': 'Блоки шаблона повреждены',
+};
+
 app.post('/api/templates', (req, res) => {
-  const { id, name, blocks } = req.body;
+  const { id, name, blocks } = req.body ?? {};
+  const error = templateError({ name, blocks });
+  if (error) return fail(res, 400, error, TEMPLATE_ERRORS[error]);
   const newId = id || makeId();
   db.prepare('INSERT INTO templates (id, name, blocks) VALUES (?, ?, ?)')
-    .run(newId, name, JSON.stringify(blocks));
-  audit('create', 'templates', newId, name);
+    .run(newId, String(name).trim(), JSON.stringify(blocks));
+  audit('create', 'templates', newId, String(name).trim());
   res.json({ id: newId });
 });
 
 app.put('/api/templates/:id', (req, res) => {
-  const { name, blocks } = req.body;
+  const current = db.prepare('SELECT * FROM templates WHERE id = ?').get(req.params.id) as { name: string; blocks: string } | undefined;
+  if (!current) return fail(res, 404, 'tpl.notFound', 'Шаблон не найден');
+  // Частичная правка: чего нет в запросе — остаётся как было.
+  const name = req.body?.name ?? current.name;
+  const blocks = req.body?.blocks ?? JSON.parse(current.blocks);
+  const error = templateError({ name, blocks });
+  if (error) return fail(res, 400, error, TEMPLATE_ERRORS[error]);
   db.prepare('UPDATE templates SET name = ?, blocks = ? WHERE id = ?')
-    .run(name, JSON.stringify(blocks), req.params.id);
-  audit('update', 'templates', req.params.id, name);
+    .run(String(name).trim(), JSON.stringify(blocks), req.params.id);
+  audit('update', 'templates', req.params.id, String(name).trim());
   res.json({ success: true });
 });
 
@@ -581,7 +805,32 @@ app.delete('/api/timesheets/:id', (req, res) => {
 app.get('/api/archives/facets', (_req, res) => {
   const years = db.prepare('SELECT DISTINCT year FROM archives ORDER BY year DESC').all().map((r: any) => r.year);
   const departments = db.prepare('SELECT DISTINCT department FROM archives ORDER BY department').all().map((r: any) => r.department);
-  res.json({ years, departments });
+  // Сотрудники — те, кто есть в архиве, а не нынешний штат: в архиве лежат
+  // и уволенные, и удалённые из картотеки.
+  const employees = db.prepare('SELECT employee_id AS id, MAX(employee_name) AS name FROM archives GROUP BY employee_id ORDER BY name')
+    .all() as { id: string; name: string }[];
+  res.json({ years, departments, employees });
+});
+
+// Закрытие месяца: строки архива за месяц одним целым. replace — заменить
+// ранее отправленные строки этого же месяца (повторное закрытие).
+app.post('/api/archives/bulk', (req, res) => {
+  const records = Array.isArray(req.body?.records) ? req.body.records : null;
+  if (!records) return fail(res, 400, 'archive.bulkShape', 'Ожидался массив records');
+  const replace = req.body?.replace as { year: number; month: number } | undefined;
+
+  const stmt = db.prepare('INSERT INTO archives (id, year, month, employee_id, employee_name, department, position, salary, hours_worked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+  const ids: string[] = [];
+  db.transaction(() => {
+    if (replace) db.prepare('DELETE FROM archives WHERE year = ? AND month = ?').run(replace.year, replace.month);
+    for (const r of records) {
+      const newId = r.id || makeId();
+      stmt.run(newId, r.year, r.month, r.employeeId, r.employeeName, r.department, r.position, r.salary ?? 0, r.hoursWorked ?? 0);
+      ids.push(newId);
+    }
+  })();
+  audit('archive_month', 'archives', null, replace ? `${replace.year}-${String(replace.month).padStart(2, '0')} · ${ids.length}` : String(ids.length));
+  res.json({ ids });
 });
 
 app.get('/api/archives', (req, res) => {

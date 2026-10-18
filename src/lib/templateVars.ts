@@ -22,7 +22,17 @@ const ALIASES: Record<string, string> = {
   'Дата приема': 'hireDate',
   'Дата приёма': 'hireDate',
   'Организация': 'orgName',
+  'Директор': 'director',
+  'ИНН': 'inn',
+  'Сегодня': 'today',
+  'Дата документа': 'today',
 };
+
+/**
+ * Переменные, которые заполняются сами: из карточки сотрудника, из «Настройки →
+ * Общие» и текущая дата. Конструктор показывает их списком для вставки.
+ */
+export const BUILTIN_VARIABLES = ['fullName', 'position', 'department', 'hireDate', 'salary', 'orgName', 'director', 'inn', 'today'] as const;
 
 export const VARIABLE_PATTERN = /\{\{\s*([^{}]+?)\s*\}\}/g;
 

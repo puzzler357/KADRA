@@ -79,24 +79,57 @@ function prefetchPages() {
 import LockScreen from './components/LockScreen';
 import { ErrorState } from './components/States';
 import * as api from './data';
+import type { AuthStatus } from './data/types';
 import { useIdleLock } from './lib/useIdleLock';
 import { useAppStore } from './store/useAppStore';
 import { useDatabaseStore } from './store/useDatabaseStore';
 
+// Истёкшая сессия веб-режима (сервер перезапущен, токен не подходит) —
+// выходим, и приложение покажет вход по паролю.
+api.setSessionExpiredHandler(() => {
+  if (useAppStore.getState().user) useAppStore.getState().logout();
+});
+
 export default function App() {
-  const { user, startScreen, locked, requirePassword, login } = useAppStore();
+  const { user, startScreen, locked, requirePassword, setRequirePassword, login } = useAppStore();
   const { fetchAll, error } = useDatabaseStore();
 
-  // Проверка владельца не мгновенная — это запрос к базе.
+  // Состояние учётной записи читается из базы: есть ли владелец, задан ли
+  // пароль, включён ли запрос пароля при входе.
+  const [status, setStatus] = useState<AuthStatus | null>(null);
   const [ownerChecked, setOwnerChecked] = useState(false);
 
   useIdleLock();
 
+  useEffect(() => {
+    let cancelled = false;
+    api.authStatus()
+      .then(async (s) => {
+        // Прежние версии держали запрос пароля в localStorage. Если владелец
+        // его включал, переносим пожелание в базу один раз.
+        const app = useAppStore.getState();
+        if (app.pendingRequirePasswordSync) {
+          app.clearPendingRequirePasswordSync();
+          if (s.hasPassword && !s.requirePassword) {
+            await api.setRequirePassword(true).catch(() => undefined);
+            s = { ...s, requirePassword: true };
+          }
+        }
+        if (cancelled) return;
+        setRequirePassword(s.requirePassword);
+        setStatus(s);
+      })
+      .catch(() => {
+        if (!cancelled) setStatus({ hasOwner: false, hasPassword: false, requirePassword: false, ownerName: null });
+      });
+    return () => { cancelled = true; };
+  }, [setRequirePassword]);
+
   // Пароль при входе выключен — подставляем владельца сами. Учётная запись
-  // в приложении одна, и запрашивать её пароль при каждом запуске незачем;
+  // в приложении одна, и спрашивать её пароль при каждом запуске незачем;
   // кому нужен экран входа, включает его в «Настройки → Безопасность».
   useEffect(() => {
-    if (user || requirePassword) return;
+    if (!status || user || requirePassword) return;
 
     let cancelled = false;
     api.currentOwner()
@@ -107,12 +140,12 @@ export default function App() {
       .finally(() => { if (!cancelled) setOwnerChecked(true); });
 
     return () => { cancelled = true; };
-  }, [user, requirePassword, login]);
+  }, [status, user, requirePassword, login]);
 
   // Данные грузим, как только стало понятно, под кем работаем. Ждать user
   // нельзя: без учётной записи он так и останется пустым, а приложение
   // должно работать.
-  const ready = Boolean(user) || ownerChecked;
+  const ready = Boolean(status) && (Boolean(user) || (!requirePassword && ownerChecked));
   useEffect(() => {
     if (ready) {
       // Остальные экраны — после стартовых данных, а не наперегонки с ними.
@@ -120,15 +153,20 @@ export default function App() {
     }
   }, [ready, fetchAll]);
 
-  // Экран входа — только если владелец сам включил запрос пароля. Включить
-  // его можно, лишь задав пароль, так что учётная запись к этому моменту
-  // точно есть.
-  if (requirePassword && !user) {
-    return <Login />;
+  // Пока база не ответила, рисовать нечего: экран входа или имя в шапке
+  // мигнули бы.
+  if (!status) {
+    return <div className="min-h-screen bg-[var(--background)]" />;
   }
 
-  // Пока проверка владельца не отработала, рисовать нечего: имя в шапке
-  // мигнуло бы.
+  // Экран входа — только если владелец сам включил запрос пароля. Включить
+  // его можно, лишь задав пароль, так что учётная запись к этому моменту
+  // точно есть. Сессия живёт до закрытия окна: после перезапуска
+  // программы пароль спрашивается снова.
+  if (requirePassword && !user) {
+    return <Login ownerName={status.ownerName} />;
+  }
+
   if (!ready) {
     return <div className="min-h-screen bg-[var(--background)]" />;
   }

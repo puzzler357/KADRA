@@ -21,4 +21,12 @@ i18n
     },
   });
 
+// Атрибут lang у страницы следует за языком интерфейса: от него зависят
+// переносы, проверка орфографии и экранные читалки.
+const syncDocumentLanguage = (lng: string) => {
+  if (typeof document !== 'undefined') document.documentElement.lang = lng;
+};
+syncDocumentLanguage(i18n.language);
+i18n.on('languageChanged', syncDocumentLanguage);
+
 export default i18n;

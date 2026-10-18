@@ -4,8 +4,7 @@ import { MoreHorizontal, Edit, Trash, FileText, Printer, X, History } from 'luci
 import { useDatabaseStore, Employee, Template } from '../store/useDatabaseStore';
 import EmployeeForm from './EmployeeForm';
 import EmployeeHistory from './EmployeeHistory';
-import { renderTemplate } from '../lib/templateVars';
-import { useAppStore } from '../store/useAppStore';
+import { PrintPortal, TemplateDocument, useTemplateValues } from './TemplateDocument';
 import { clickable } from '../lib/a11y';
 import { useNotify } from './Toasts';
 
@@ -24,7 +23,13 @@ export default function EmployeeActions({ employee }: { employee: Employee }) {
   const handleDelete = async () => {
     setIsOpen(false);
     const ok = await notify.confirm(t('employees.actions.deleteConfirm', { name: employee.fullName }), { danger: true });
-    if (ok) deleteEmployee(employee.id);
+    if (!ok) return;
+    try {
+      await deleteEmployee(employee.id);
+      notify.success(t('employees.deleted'));
+    } catch (e) {
+      notify.error(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const openDocModal = () => {
@@ -32,15 +37,20 @@ export default function EmployeeActions({ employee }: { employee: Employee }) {
     setIsOpen(false);
   };
 
-  const handleEdit = (data: Omit<Employee, 'id'>) => {
-    updateEmployee(employee.id, data);
+  // Ошибка сохранения уходит в форму: она её покажет и не закроется.
+  const handleEdit = async (data: Omit<Employee, 'id'>) => {
+    await updateEmployee(employee.id, data);
     setIsEditOpen(false);
+    notify.success(t('employees.saved'));
   };
 
   return (
     <div className="relative">
-      <button 
+      <button
         onClick={toggleDropdown}
+        aria-label={t('employees.actions.menu', { name: employee.fullName })}
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
         className="p-1 rounded hover:bg-surface-hover dark:hover:bg-slate-800 text-muted transition-colors"
       >
         <MoreHorizontal className="w-5 h-5" />
@@ -108,102 +118,50 @@ export default function EmployeeActions({ employee }: { employee: Employee }) {
 
 function DocModal({ employee, templates, onClose }: { employee: Employee, templates: Template[], onClose: () => void }) {
   const { t } = useTranslation();
-  const orgName = useAppStore((s) => s.orgName);
   const [selectedTemplateId, setSelectedTemplateId] = useState(templates[0]?.id || '');
-
-  const template = templates.find(t => t.id === selectedTemplateId);
-
-  // Подстановка та же, что в «Генерации документов»: раньше здесь был свой
-  // набор замен, понимавший меньше переменных.
-  const processTemplate = (content: string) => renderTemplate(content, {
-    fullName: employee.fullName,
-    position: employee.position,
-    department: employee.department,
-    hireDate: new Date(employee.hireDate).toLocaleDateString(),
-    orgName,
-  });
-
-  const handlePrint = () => {
-    const printWindow = window.open('', '', 'width=800,height=600');
-    if (!printWindow) return;
-    
-    let htmlContent = `
-      <html>
-        <head>
-          <title>${t('employees.doc.printTitle')}</title>
-          <style>
-            body { font-family: 'Times New Roman', serif; line-height: 1.6; padding: 40px; }
-            h1 { text-align: center; font-size: 18px; margin-bottom: 20px; }
-            p { margin-bottom: 15px; font-size: 14pt; }
-            .signature { margin-top: 50px; display: flex; justify-content: space-between; }
-          </style>
-        </head>
-        <body>
-    `;
-    
-    template?.blocks.forEach(block => {
-      htmlContent += `<p>${processTemplate(block.content)}</p>`;
-    });
-    
-    htmlContent += `
-          <div class="signature">
-            <span>${t('employees.doc.signatureHead')}</span>
-            <span>_________________</span>
-          </div>
-        </body>
-      </html>
-    `;
-    
-    printWindow.document.write(htmlContent);
-    printWindow.document.close();
-    printWindow.focus();
-    setTimeout(() => {
-      printWindow.print();
-      printWindow.close();
-    }, 250);
-  };
+  const template = templates.find(item => item.id === selectedTemplateId);
+  // Подстановка та же, что в «Генерации документов»: оклад, дата приёма в
+  // формате из настроек, организация, таблицы и подписи.
+  const { values } = useTemplateValues(employee);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-surface backdrop-blur-sm">
-      <div className="bg-white dark:bg-slate-900 border border-[var(--border-color)] rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="doc-modal-title">
+      <div className="bg-surface border border-[var(--border-color)] rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
         <div className="flex items-center justify-between p-4 border-b border-[var(--border-color)]">
-          <h3 className="text-lg font-semibold">{t('employees.doc.title')}</h3>
-          <button onClick={onClose} className="p-1 rounded-lg hover:bg-surface-hover dark:hover:bg-slate-800">
+          <h3 id="doc-modal-title" className="text-lg font-semibold text-primary">{t('employees.doc.title')}</h3>
+          <button onClick={onClose} aria-label={t('common.close')} className="p-1 rounded-lg hover:bg-surface-hover">
             <X className="w-5 h-5 text-muted" />
           </button>
         </div>
-        
+
         <div className="p-6 overflow-y-auto flex-1">
-          <label className="block text-sm font-medium mb-2">{t('employees.doc.selectTemplate')}</label>
-          <select 
-            value={selectedTemplateId} 
+          <label htmlFor="doc-template" className="block text-sm font-medium mb-2 text-secondary">{t('employees.doc.selectTemplate')}</label>
+          <select
+            id="doc-template"
+            value={selectedTemplateId}
             onChange={e => setSelectedTemplateId(e.target.value)}
-            className="w-full bg-[var(--background)] border border-[var(--border-color)] rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 mb-6"
+            className="w-full bg-[var(--background)] border border-[var(--border-color)] rounded-xl px-4 py-2 text-sm text-primary focus:outline-none focus:ring-2 focus:ring-accent-500 mb-6"
           >
             {templates.length === 0 && <option value="" disabled>{t('employees.doc.noTemplates')}</option>}
-            {templates.map(t => (
-              <option key={t.id} value={t.id}>{t.name}</option>
+            {templates.map(item => (
+              <option key={item.id} value={item.id}>{item.name}</option>
             ))}
           </select>
 
           {template && (
-            <div className="border border-[var(--border-color)] rounded-xl p-6 bg-surface-2 dark:bg-slate-950 font-serif text-primary dark:text-slate-200">
-              {template.blocks.map(block => (
-                <p key={block.id} className="mb-4">
-                  {processTemplate(block.content)}
-                </p>
-              ))}
+            <div className="border border-[var(--border-color)] rounded-xl overflow-hidden">
+              <TemplateDocument template={template} values={values} className="p-8 font-serif" />
             </div>
           )}
         </div>
-        
-        <div className="p-4 border-t border-[var(--border-color)] flex justify-end gap-3 bg-surface-2 dark:bg-slate-900/50">
-          <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium hover:bg-surface-hover dark:hover:bg-slate-800 transition-colors border border-transparent">
+
+        <div className="p-4 border-t border-[var(--border-color)] flex justify-end gap-3 bg-surface-2">
+          <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium text-secondary hover:bg-surface-hover transition-colors border border-transparent">
             {t('common.cancel')}
           </button>
           <button
             disabled={!template}
-            onClick={handlePrint}
+            onClick={() => window.print()}
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-white bg-accent-600 hover:bg-accent-700 transition-colors disabled:opacity-50"
           >
             <Printer className="w-4 h-4" />
@@ -211,6 +169,11 @@ function DocModal({ employee, templates, onClose }: { employee: Employee, templa
           </button>
         </div>
       </div>
+      {template && (
+        <PrintPortal>
+          <TemplateDocument template={template} values={values} className="font-serif" />
+        </PrintPortal>
+      )}
     </div>
   );
 }

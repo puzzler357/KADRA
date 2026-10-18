@@ -1,5 +1,5 @@
 {
-  "latest": 5,
+  "latest": 9,
   "migrationsTableSql": "\n  CREATE TABLE IF NOT EXISTS _migrations (\n    version INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    applied_at TEXT NOT NULL\n  );\n",
   "migrations": [
     {
@@ -70,7 +70,53 @@
       "steps": [
         {
           "kind": "sql",
-          "sql": "CREATE TABLE IF NOT EXISTS candidates (\n    id TEXT PRIMARY KEY,\n    full_name TEXT NOT NULL,\n    position TEXT NOT NULL,\n    experience TEXT,\n    status TEXT NOT NULL,\n    created_at TEXT NOT NULL,\n    note TEXT\n  );\n  CREATE INDEX IF NOT EXISTS idx_candidates_status ON candidates(status);\n  CREATE TABLE IF NOT EXISTS time_off_requests (\n    id TEXT PRIMARY KEY,\n    employee_id TEXT NOT NULL,\n    type TEXT NOT NULL,\n    date_from TEXT NOT NULL,\n    date_to TEXT NOT NULL,\n    days INTEGER NOT NULL DEFAULT 0,\n    status TEXT NOT NULL,\n    comment TEXT\n  );\n  CREATE INDEX IF NOT EXISTS idx_time_off_requests_employee_id ON time_off_requests(employee_id);\n  CREATE INDEX IF NOT EXISTS idx_time_off_requests_status ON time_off_requests(status);\n  CREATE TABLE IF NOT EXISTS checklist_tasks (\n    id TEXT PRIMARY KEY,\n    employee_id TEXT NOT NULL,\n    kind TEXT NOT NULL,\n    title TEXT NOT NULL,\n    assignee TEXT,\n    done INTEGER NOT NULL DEFAULT 0,\n    comment TEXT,\n    order_index INTEGER NOT NULL DEFAULT 0\n  );\n  CREATE INDEX IF NOT EXISTS idx_checklist_tasks_employee_id ON checklist_tasks(employee_id);\n  CREATE TABLE IF NOT EXISTS goals (\n    id TEXT PRIMARY KEY,\n    employee_id TEXT NOT NULL,\n    title TEXT NOT NULL,\n    progress INTEGER NOT NULL DEFAULT 0,\n    status TEXT NOT NULL,\n    period TEXT NOT NULL\n  );\n  CREATE INDEX IF NOT EXISTS idx_goals_employee_id ON goals(employee_id);\n  CREATE INDEX IF NOT EXISTS idx_goals_status ON goals(status);\n  CREATE TABLE IF NOT EXISTS reviews (\n    id TEXT PRIMARY KEY,\n    employee_id TEXT NOT NULL,\n    reviewer TEXT NOT NULL,\n    period TEXT NOT NULL,\n    score REAL NOT NULL DEFAULT 0,\n    comment TEXT\n  );\n  CREATE INDEX IF NOT EXISTS idx_reviews_employee_id ON reviews(employee_id);\n  CREATE TABLE IF NOT EXISTS movements (\n    id TEXT PRIMARY KEY,\n    employee_id TEXT NOT NULL,\n    type TEXT NOT NULL,\n    date TEXT NOT NULL,\n    from_position TEXT,\n    to_position TEXT,\n    from_department TEXT,\n    to_department TEXT,\n    from_salary REAL NOT NULL DEFAULT 0,\n    to_salary REAL NOT NULL DEFAULT 0,\n    order_no TEXT,\n    reason TEXT\n  );\n  CREATE INDEX IF NOT EXISTS idx_movements_employee_id ON movements(employee_id);\n  CREATE INDEX IF NOT EXISTS idx_movements_date ON movements(date);\n  CREATE TABLE IF NOT EXISTS audit_log (\n    id TEXT PRIMARY KEY,\n    ts TEXT NOT NULL,\n    action TEXT NOT NULL,\n    entity TEXT NOT NULL,\n    entity_id TEXT,\n    diff TEXT\n  );\n  CREATE TABLE IF NOT EXISTS report_presets (\n    id TEXT PRIMARY KEY,\n    name TEXT NOT NULL,\n    config TEXT NOT NULL\n  );\n  CREATE TABLE IF NOT EXISTS backups (\n    id TEXT PRIMARY KEY,\n    created_at TEXT NOT NULL,\n    file_name TEXT NOT NULL,\n    rows INTEGER NOT NULL DEFAULT 0,\n    note TEXT\n  );\n  CREATE TABLE IF NOT EXISTS kb_categories (\n    id TEXT PRIMARY KEY,\n    name TEXT NOT NULL,\n    order_index INTEGER NOT NULL DEFAULT 0\n  );\n  CREATE TABLE IF NOT EXISTS kb_articles (\n    id TEXT PRIMARY KEY,\n    category_id TEXT,\n    title TEXT NOT NULL,\n    content_html TEXT,\n    reads INTEGER NOT NULL DEFAULT 0,\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL\n  );\n  CREATE INDEX IF NOT EXISTS idx_kb_articles_category_id ON kb_articles(category_id);"
+          "sql": "CREATE TABLE IF NOT EXISTS candidates (\n    id TEXT PRIMARY KEY,\n    full_name TEXT NOT NULL,\n    position TEXT NOT NULL,\n    experience TEXT,\n    status TEXT NOT NULL,\n    created_at TEXT NOT NULL,\n    note TEXT\n  );\n  CREATE INDEX IF NOT EXISTS idx_candidates_status ON candidates(status);\n  CREATE TABLE IF NOT EXISTS time_off_requests (\n    id TEXT PRIMARY KEY,\n    employee_id TEXT NOT NULL,\n    type TEXT NOT NULL,\n    date_from TEXT NOT NULL,\n    date_to TEXT NOT NULL,\n    days INTEGER NOT NULL DEFAULT 0,\n    status TEXT NOT NULL,\n    comment TEXT\n  );\n  CREATE INDEX IF NOT EXISTS idx_time_off_requests_employee_id ON time_off_requests(employee_id);\n  CREATE INDEX IF NOT EXISTS idx_time_off_requests_status ON time_off_requests(status);\n  CREATE TABLE IF NOT EXISTS checklist_tasks (\n    id TEXT PRIMARY KEY,\n    employee_id TEXT NOT NULL,\n    kind TEXT NOT NULL,\n    title TEXT NOT NULL,\n    assignee TEXT,\n    done INTEGER NOT NULL DEFAULT 0,\n    comment TEXT,\n    order_index INTEGER NOT NULL DEFAULT 0\n  );\n  CREATE INDEX IF NOT EXISTS idx_checklist_tasks_employee_id ON checklist_tasks(employee_id);\n  CREATE TABLE IF NOT EXISTS goals (\n    id TEXT PRIMARY KEY,\n    employee_id TEXT NOT NULL,\n    title TEXT NOT NULL,\n    progress INTEGER NOT NULL DEFAULT 0,\n    status TEXT NOT NULL,\n    period TEXT NOT NULL\n  );\n  CREATE INDEX IF NOT EXISTS idx_goals_employee_id ON goals(employee_id);\n  CREATE INDEX IF NOT EXISTS idx_goals_status ON goals(status);\n  CREATE TABLE IF NOT EXISTS reviews (\n    id TEXT PRIMARY KEY,\n    employee_id TEXT NOT NULL,\n    reviewer TEXT NOT NULL,\n    period TEXT NOT NULL,\n    score REAL NOT NULL DEFAULT 0,\n    comment TEXT\n  );\n  CREATE INDEX IF NOT EXISTS idx_reviews_employee_id ON reviews(employee_id);\n  CREATE TABLE IF NOT EXISTS movements (\n    id TEXT PRIMARY KEY,\n    employee_id TEXT NOT NULL,\n    type TEXT NOT NULL,\n    date TEXT NOT NULL,\n    from_position TEXT,\n    to_position TEXT,\n    from_department TEXT,\n    to_department TEXT,\n    from_salary REAL NOT NULL DEFAULT 0,\n    to_salary REAL NOT NULL DEFAULT 0,\n    order_no TEXT,\n    reason TEXT,\n    employee_name TEXT\n  );\n  CREATE INDEX IF NOT EXISTS idx_movements_employee_id ON movements(employee_id);\n  CREATE INDEX IF NOT EXISTS idx_movements_date ON movements(date);\n  CREATE TABLE IF NOT EXISTS audit_log (\n    id TEXT PRIMARY KEY,\n    ts TEXT NOT NULL,\n    action TEXT NOT NULL,\n    entity TEXT NOT NULL,\n    entity_id TEXT,\n    diff TEXT\n  );\n  CREATE TABLE IF NOT EXISTS report_presets (\n    id TEXT PRIMARY KEY,\n    name TEXT NOT NULL,\n    config TEXT NOT NULL\n  );\n  CREATE TABLE IF NOT EXISTS backups (\n    id TEXT PRIMARY KEY,\n    created_at TEXT NOT NULL,\n    file_name TEXT NOT NULL,\n    rows INTEGER NOT NULL DEFAULT 0,\n    note TEXT\n  );\n  CREATE TABLE IF NOT EXISTS kb_categories (\n    id TEXT PRIMARY KEY,\n    name TEXT NOT NULL,\n    order_index INTEGER NOT NULL DEFAULT 0\n  );\n  CREATE TABLE IF NOT EXISTS kb_articles (\n    id TEXT PRIMARY KEY,\n    category_id TEXT,\n    title TEXT NOT NULL,\n    content_html TEXT,\n    reads INTEGER NOT NULL DEFAULT 0,\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL\n  );\n  CREATE INDEX IF NOT EXISTS idx_kb_articles_category_id ON kb_articles(category_id);"
+        }
+      ]
+    },
+    {
+      "version": 6,
+      "name": "owner-require-password",
+      "steps": [
+        {
+          "kind": "addColumn",
+          "table": "users",
+          "column": "require_password",
+          "definition": "INTEGER NOT NULL DEFAULT 0"
+        }
+      ]
+    },
+    {
+      "version": 7,
+      "name": "employee-dismissal-date",
+      "steps": [
+        {
+          "kind": "addColumn",
+          "table": "employees",
+          "column": "dismissal_date",
+          "definition": "TEXT"
+        }
+      ]
+    },
+    {
+      "version": 8,
+      "name": "staffing-revisions-review-cycles",
+      "steps": [
+        {
+          "kind": "sql",
+          "sql": "CREATE TABLE IF NOT EXISTS staffing_revisions (\n    id TEXT PRIMARY KEY,\n    title TEXT NOT NULL,\n    effective_date TEXT NOT NULL,\n    created_at TEXT NOT NULL,\n    note TEXT,\n    snapshot TEXT NOT NULL\n  );\n  CREATE TABLE IF NOT EXISTS review_cycles (\n    id TEXT PRIMARY KEY,\n    period TEXT NOT NULL,\n    scope TEXT NOT NULL,\n    started_at TEXT NOT NULL,\n    status TEXT NOT NULL\n  );\n  CREATE INDEX IF NOT EXISTS idx_review_cycles_status ON review_cycles(status);"
+        }
+      ]
+    },
+    {
+      "version": 9,
+      "name": "movement-employee-name",
+      "steps": [
+        {
+          "kind": "addColumn",
+          "table": "movements",
+          "column": "employee_name",
+          "definition": "TEXT"
         }
       ]
     }
@@ -493,7 +539,7 @@
         ]
       },
       {
-        "sql": "INSERT INTO movements (id, employee_id, type, date, from_position, to_position, from_department, to_department, from_salary, to_salary, order_no, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "sql": "INSERT INTO movements (id, employee_id, type, date, from_position, to_position, from_department, to_department, from_salary, to_salary, order_no, reason, employee_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         "rows": [
           [
             "m1",
@@ -507,6 +553,7 @@
             0,
             0,
             "П-1",
+            null,
             null
           ],
           [
@@ -521,6 +568,7 @@
             0,
             0,
             "П-2",
+            null,
             null
           ],
           [
@@ -535,6 +583,7 @@
             0,
             0,
             "П-3",
+            null,
             null
           ],
           [
@@ -549,6 +598,7 @@
             0,
             0,
             "П-4",
+            null,
             null
           ],
           [
@@ -563,6 +613,7 @@
             0,
             0,
             "П-5",
+            null,
             null
           ]
         ]

@@ -15,14 +15,17 @@ export interface PositionStat {
   total: number;
   occupied: number;
   vacant: number;
+  /** Занято сверх штата: людей на должности больше, чем единиц. */
+  over: number;
   salary: number;
 }
 
 /**
- * Занято ли место: сотрудник считается занимающим должность, если совпадают
- * название должности и подразделение. При просмотре «по всей компании»
- * подразделение не учитывается — иначе одноимённые должности в разных
- * отделах схлопнулись бы в одну.
+ * Занято ли место: сотрудник занимает должность, если совпадают и название
+ * должности, и подразделение — в том числе при просмотре «по всей
+ * организации». Раньше там подразделение не сверялось, и одноимённые
+ * должности разных отделов («Бухгалтер» в двух местах) засчитывали друг
+ * другу чужих людей.
  */
 export function positionStats(
   positions: Position[],
@@ -37,13 +40,12 @@ export function positionStats(
 
   return scoped.map((position) => {
     const depName = departmentName(position.departmentId);
-    const occupied = employees.filter((employee) => {
-      if (employee.position !== position.title) return false;
+    const occupied = employees.filter((employee) =>
+      employee.position === position.title
+      && employee.department === depName
       // Уволенные штатную единицу не занимают.
-      if (employee.status === 'dismissed') return false;
-      if (!scopeDepartmentId) return true;
-      return employee.department === depName;
-    }).length;
+      && employee.status !== 'dismissed',
+    ).length;
 
     return {
       positionId: position.id,
@@ -52,13 +54,37 @@ export function positionStats(
       total: position.maxCount,
       occupied,
       vacant: Math.max(0, position.maxCount - occupied),
+      over: Math.max(0, occupied - position.maxCount),
       salary: position.salary,
     };
-  }).sort((a, b) => b.total - a.total);
+  }).sort((a, b) => b.total - a.total || a.title.localeCompare(b.title, 'ru'));
 }
 
-export function staffingSummary(stats: PositionStat[]): { total: number; occupied: number; vacant: number } {
-  const total = stats.reduce((sum, s) => sum + s.total, 0);
-  const occupied = stats.reduce((sum, s) => sum + s.occupied, 0);
-  return { total, occupied, vacant: Math.max(0, total - occupied) };
+export interface StaffingSummary {
+  total: number;
+  occupied: number;
+  /** Свободные единицы — сумма по должностям. */
+  vacant: number;
+  /** Люди сверх штата — сумма по должностям. */
+  over: number;
+}
+
+/**
+ * Сводка по должностям. Вакансии и перекомплект считаются по каждой
+ * должности отдельно: лишний бухгалтер не закрывает вакансию инженера.
+ * Раньше бралось «всего минус занято», и перекомплект в одном месте молча
+ * съедал вакансии в другом.
+ */
+export function staffingSummary(stats: PositionStat[]): StaffingSummary {
+  return stats.reduce<StaffingSummary>((sum, s) => ({
+    total: sum.total + s.total,
+    occupied: sum.occupied + s.occupied,
+    vacant: sum.vacant + s.vacant,
+    over: sum.over + s.over,
+  }), { total: 0, occupied: 0, vacant: 0, over: 0 });
+}
+
+/** Месячный фонд по штатному расписанию: единицы × оклад. */
+export function staffingFund(positions: Pick<Position, 'maxCount' | 'salary'>[]): number {
+  return positions.reduce((sum, p) => sum + (Number(p.maxCount) || 0) * (Number(p.salary) || 0), 0);
 }

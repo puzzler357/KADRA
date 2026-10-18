@@ -15,6 +15,7 @@
 *.db    binary
 *.docx  binary
 *.xlsx  binary
+*.tgz   binary
 
 # Lock-файлы: генерируются инструментами, в diff шумят
 package-lock.json  linguist-generated=true -diff

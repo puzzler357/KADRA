@@ -142,7 +142,40 @@ export const MIGRATIONS: Migration[] = [
     name: 'screen-entities',
     // Таблицы экранов подбора, отпусков, онбординга, оценки, базы знаний,
     // кадровых движений, журнала аудита, наборов отчётов и копий.
-    steps: [sql(allSchemaSql())],
+    steps: [sql(allSchemaSql(5))],
+  },
+  {
+    version: 6,
+    name: 'owner-require-password',
+    // Запрос пароля при входе жил в localStorage окна: очистка данных
+    // браузера или WebView молча выключала его. Теперь это свойство учётной
+    // записи и хранится вместе с ней.
+    steps: [
+      { kind: 'addColumn', table: 'users', column: 'require_password', definition: 'INTEGER NOT NULL DEFAULT 0' },
+    ],
+  },
+  {
+    version: 7,
+    name: 'employee-dismissal-date',
+    // Дата увольнения: без неё табель засчитывал уволенному дни после ухода.
+    steps: [
+      { kind: 'addColumn', table: 'employees', column: 'dismissal_date', definition: 'TEXT' },
+    ],
+  },
+  {
+    version: 8,
+    name: 'staffing-revisions-review-cycles',
+    // Редакции штатного расписания и циклы оценки 360°.
+    steps: [sql(allSchemaSql(8))],
+  },
+  {
+    version: 9,
+    name: 'movement-employee-name',
+    // ФИО в журнале кадровых операций: после удаления карточки приказ
+    // показывал «—» вместо фамилии.
+    steps: [
+      { kind: 'addColumn', table: 'movements', column: 'employee_name', definition: 'TEXT' },
+    ],
   },
 ];
 

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { LicenseBanner } from './LicenseGate';
 import { useTranslation } from 'react-i18next';
 import {
@@ -16,25 +16,15 @@ import {
   Clock,
   Target,
   BookOpen,
-  Archive
+  Archive,
+  LogOut
 } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAppStore } from '../store/useAppStore';
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation();
-  const { theme, sidebarOpen, toggleSidebar, user } = useAppStore();
-
-  useEffect(() => {
-    // Initial theme apply
-    const root = window.document.documentElement;
-    if (theme === 'system') {
-      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-      root.classList.add(systemTheme);
-    } else {
-      root.classList.add(theme);
-    }
-  }, [theme]);
+  const { sidebarOpen, toggleSidebar, user, requirePassword, logout } = useAppStore();
 
 
   // Однопользовательское приложение: все разделы доступны владельцу устройства.
@@ -61,11 +51,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
 
   const location = useLocation();
-  const currentNav = visibleNavItems.find(item => item.path === location.pathname);
+  // Вложенные страницы (конструктор шаблона /templates/new) подписываются
+  // разделом, из которого открыты, а не общим «KADRA».
+  const currentNav = visibleNavItems.find(item => item.path === location.pathname)
+    ?? visibleNavItems.find(item => item.path !== '/' && location.pathname.startsWith(`${item.path}/`));
   const title = currentNav ? currentNav.label : t('app_name');
 
+  // При печати оболочка не должна резать документ одной страницей и
+  // закрашивать поля листа фоном темы — отсюда print:-классы.
   return (
-    <div className="flex h-screen bg-[var(--background)] text-[var(--foreground)] overflow-hidden">
+    <div className="flex h-screen bg-[var(--background)] text-[var(--foreground)] overflow-hidden print:block print:h-auto print:overflow-visible print:bg-white">
       {/* Sidebar */}
       <aside 
         className={`no-print ${
@@ -75,8 +70,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <div className="h-20 flex items-center justify-between px-6">
           {sidebarOpen && (
             <div className="flex items-center">
-              <img src="/brand/kadra-logo.png" alt="KADRA — учёт кадров" className="h-14 w-auto dark:hidden" />
-              <img src="/brand/kadra-logo-light.png" alt="KADRA — учёт кадров" className="h-14 w-auto hidden dark:block" />
+              <img src="/brand/kadra-logo.png" alt={t('app_name')} className="h-14 w-auto dark:hidden" />
+              <img src="/brand/kadra-logo-light.png" alt={t('app_name')} className="h-14 w-auto hidden dark:block" />
             </div>
           )}
           {!sidebarOpen && (
@@ -89,11 +84,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <NavLink 
               key={item.id}
               to={item.path}
-              className={({ isActive }) => `flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors text-left ${isActive ? 'bg-accent-600/10 text-accent-400 font-medium' : 'hover:bg-surface-hover text-secondary'}`}
+              className={({ isActive }) => `flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors text-left ${isActive ? 'bg-accent-600/10 text-accent-700 dark:text-accent-300 font-medium' : 'hover:bg-surface-hover text-secondary'}`}
             >
               {({ isActive }) => (
                 <>
-                  <item.icon className={`w-5 h-5 flex-shrink-0 ${isActive ? 'text-accent-400' : 'text-muted'}`} />
+                  <item.icon className={`w-5 h-5 flex-shrink-0 ${isActive ? 'text-accent-700 dark:text-accent-300' : 'text-muted'}`} />
                   {sidebarOpen && <span className="text-sm truncate">{item.label}</span>}
                 </>
               )}
@@ -105,21 +100,33 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-3">
             <img src="/brand/kadra-avatar.png" alt="" className="w-10 h-10 rounded-full flex-shrink-0" />
             {sidebarOpen && (
-              <div className="overflow-hidden">
+              <div className="overflow-hidden flex-1">
                 <p className="font-medium text-sm text-primary truncate">{user?.name || 'KADRA'}</p>
                 <p className="text-xs text-muted truncate">{t('user.owner')}</p>
               </div>
+            )}
+            {/* Выход имеет смысл, только когда вход защищён паролем: без пароля
+                приложение тут же открылось бы снова. */}
+            {requirePassword && user && (
+              <button
+                onClick={logout}
+                aria-label={t('user.logout')}
+                title={t('user.logout')}
+                className="p-2 rounded-xl text-muted hover:text-primary hover:bg-surface-hover transition-colors flex-shrink-0"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
             )}
           </div>
         </div>
       </aside>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden print:block print:overflow-visible">
         {/* Topbar */}
         <header className="no-print h-20 flex-shrink-0 flex items-center justify-between px-8">
           <div className="flex items-center gap-4">
-            <button onClick={toggleSidebar} className="p-2 -ml-2 rounded-xl hover:bg-surface-hover text-muted transition-colors">
+            <button onClick={toggleSidebar} aria-label={t('nav.toggleSidebar')} aria-expanded={sidebarOpen} className="p-2 -ml-2 rounded-xl hover:bg-surface-hover text-muted transition-colors">
               <Menu className="w-5 h-5" />
             </button>
             <h1 className="text-2xl font-bold tracking-tight text-primary">
@@ -133,8 +140,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <LicenseBanner />
 
         {/* Page Content */}
-        <main className="flex-1 overflow-y-auto px-8 pb-8">
-          <div className="max-w-7xl mx-auto">
+        <main className="flex-1 overflow-y-auto px-8 pb-8 print:overflow-visible print:p-0">
+          <div className="max-w-7xl mx-auto print:max-w-none">
             {children}
           </div>
         </main>
