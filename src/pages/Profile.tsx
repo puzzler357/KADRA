@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Mail, Briefcase, Key, Calendar as CalendarIcon, CheckSquare, History, User } from 'lucide-react';
@@ -36,11 +36,15 @@ export default function Profile() {
   const [accountBusy, setAccountBusy] = useState(false);
 
   // Владелец приезжает асинхронно: на первом рендере он ещё пуст, и поля
-  // надо заполнить, когда он появится.
-  useEffect(() => {
+  // надо заполнить, когда он появится. Сверка — при рендере, а не в эффекте:
+  // так React сразу рисует поля с нужными значениями, без лишнего прохода.
+  const ownerKey = `${user?.name ?? ''}\u0000${user?.email ?? ''}`;
+  const [syncedOwner, setSyncedOwner] = useState(ownerKey);
+  if (syncedOwner !== ownerKey) {
+    setSyncedOwner(ownerKey);
     setAccountName(user?.name ?? '');
     setAccountEmail(user?.email ?? '');
-  }, [user?.name, user?.email]);
+  }
 
   const saveAccount = async () => {
     const name = accountName.trim();
@@ -108,7 +112,7 @@ export default function Profile() {
         <div className="h-32 bg-gradient-to-r from-accent-500 to-purple-600" />
         <div className="px-8 pb-8">
           <div className="relative flex justify-between items-end -mt-12 mb-6">
-            <div className="w-24 h-24 rounded-2xl bg-surface border-4 border-line flex items-center justify-center text-3xl font-bold text-accent-400 shadow-sm">
+            <div className="w-24 h-24 rounded-2xl bg-surface border-4 border-line flex items-center justify-center text-3xl font-bold text-accent-700 dark:text-accent-300 shadow-sm">
               {user?.name?.[0] || 'U'}
             </div>
             <button
@@ -208,8 +212,8 @@ export default function Profile() {
                 {/* Смена пароля живёт в настройках — ведём туда, а не рисуем
                     вторую форму для того же действия. */}
                 <button
-                  onClick={() => navigate('/settings')}
-                  className="text-sm font-medium text-accent-400 hover:text-accent-300"
+                  onClick={() => navigate('/settings?tab=passwords')}
+                  className="text-sm font-medium text-accent-700 dark:text-accent-300 hover:underline"
                 >
                   {t('profile.change')}
                 </button>
@@ -253,7 +257,7 @@ export default function Profile() {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap transition-colors flex items-center gap-2 ${activeTab === tab.id ? 'border-accent-500 text-accent-400' : 'border-transparent text-muted hover:text-secondary'}`}
+                  className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap transition-colors flex items-center gap-2 ${activeTab === tab.id ? 'border-accent-500 text-accent-700 dark:text-accent-300' : 'border-transparent text-muted hover:text-secondary'}`}
                 >
                   <tab.icon className="w-4 h-4" /> {tab.label}
                 </button>

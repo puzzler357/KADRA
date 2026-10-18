@@ -1,42 +1,65 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Users, TrendingDown, ClipboardList, BarChart as BarChartIcon, Download, Save } from 'lucide-react';
-import { exportToExcel } from '../lib/excel';
+import { Users, TrendingDown, ClipboardList, BarChart as BarChartIcon, Download, Save, Trash2 } from 'lucide-react';
+import { exportToExcel, saveText } from '../lib/excel';
+import { exportTablePdf } from '../lib/pdfTable';
 import { useMoney } from '../lib/money';
+import { useDates, fileStamp } from '../lib/dates';
 import { positionStats } from '../lib/staffing';
-import { timesheetTotals } from '../lib/timesheet';
+import { ABSENCE_CODES, timesheetTotals } from '../lib/timesheet';
+import { employmentOf } from '../lib/archiveMonth';
+import { employeeCost } from '../lib/payroll';
+import { turnoverByMonth } from '../lib/turnover';
 import { useDatabaseStore, TABLES } from '../store/useDatabaseStore';
 import type { ReportPreset } from '../store/useDatabaseStore';
+import { useNotify } from '../components/Toasts';
+
+/** Как показывать и выгружать колонку. Числа уходят в Excel числами. */
+type ColumnKind = 'text' | 'number' | 'money' | 'percent';
+
+interface ReportColumn {
+  key: string;
+  label: string;
+  kind?: ColumnKind;
+}
 
 /**
  * Таблица отчёта. И экран, и выгрузка строятся из одного результата, поэтому
- * в файле оказывается ровно то, что человек видел на экране, — раньше кнопка
- * выгрузки не была подключена вовсе.
+ * в файле оказывается ровно то, что человек видел на экране.
  */
+type Cell = string | number | undefined;
+
 interface ReportTable {
-  columns: { key: string; label: string }[];
-  rows: Record<string, string | number>[];
+  columns: ReportColumn[];
+  rows: Record<string, Cell>[];
+  /** Строка «Итого» — отдельно, чтобы не участвовать в сортировке. */
+  total?: Record<string, Cell>;
 }
 
 type SourceId = 'employees' | 'positions' | 'timesheets' | 'archives' | 'movements' | 'candidates';
 
+/** Технические поля, которые в конструкторе не показываются. */
+const HIDDEN_FIELDS = new Set(['id', 'days', 'snapshot', 'config']);
+
 export default function Reports() {
   const { t } = useTranslation();
   const money = useMoney();
+  const dates = useDates();
+  const notify = useNotify();
 
   const [activeTab, setActiveTab] = useState('catalog');
   const [selectedReport, setSelectedReport] = useState<number | null>(null);
 
   const {
     employees, positions, departments, timesheets, archives, movements, candidates,
-    reportPresets, fetchTimesheets, fetchArchives, createIn,
+    reportPresets, fetchTimesheets, fetchArchives, createIn, removeFrom,
   } = useDatabaseStore();
 
   const now = new Date();
   const [period, setPeriod] = useState({ year: now.getFullYear(), month: now.getMonth() });
 
   // Табель и архив грузятся срезом и в общий fetchAll не входят — экран
-  // отчётов запрашивает их сам.
+  // отчётов запрашивает их сам (и для каталога, и для конструктора).
   useEffect(() => {
     fetchTimesheets(period.year, period.month);
   }, [fetchTimesheets, period.year, period.month]);
@@ -45,13 +68,13 @@ export default function Reports() {
     fetchArchives({ year: period.year });
   }, [fetchArchives, period.year]);
 
-  const employeeName = (id: string) => employees.find(e => e.id === id)?.fullName ?? '—';
+  const employeeName = (id: string, stored?: string) => employees.find(e => e.id === id)?.fullName ?? stored ?? '—';
 
   const statusLabel = (status: string) =>
     status === 'active' ? t('employees.status.active')
       : status === 'probation' ? t('employees.status.probation')
         : status === 'dismissed' ? t('employees.status.dismissed')
-          : t('employees.status.onLeave');
+          : status === 'on_leave' ? t('employees.status.onLeave') : status;
 
   const reports = [
     { id: 1, icon: Users, title: t('reports.items.headcountTitle'), desc: t('reports.items.headcountDesc') },
@@ -62,152 +85,291 @@ export default function Reports() {
   ];
 
   const monthNames = t('timesheet.months', { returnObjects: true }) as string[];
+  const movementType = (type: string) =>
+    type === 'hire' ? t('movements.hire') : type === 'transfer' ? t('movements.transfer') : t('movements.dismissal');
 
   const reportTable = useMemo<ReportTable | null>(() => {
     if (!selectedReport) return null;
 
-    // 1. Списочная численность.
+    // 1. Списочная численность — работающие сотрудники; уволенные в неё не
+    // входят, хотя карточки остаются в картотеке.
     if (selectedReport === 1) {
+      const staff = employees
+        .filter(e => e.status !== 'dismissed')
+        .sort((a, b) => a.department.localeCompare(b.department, 'ru') || a.fullName.localeCompare(b.fullName, 'ru'));
       return {
         columns: [
           { key: 'fullName', label: t('employees.col.fullName') },
+          { key: 'tabNumber', label: t('employees.col.tabNumber') },
           { key: 'position', label: t('employees.col.position') },
           { key: 'department', label: t('employees.col.department') },
           { key: 'hireDate', label: t('employees.form.hireDate') },
           { key: 'status', label: t('employees.col.status') },
+          { key: 'rate', label: t('employees.col.rate'), kind: 'number' },
+          { key: 'salary', label: t('reports.salaryByRate'), kind: 'money' },
         ],
-        rows: employees.map(e => ({
+        rows: staff.map(e => ({
           fullName: e.fullName,
+          tabNumber: e.tabNumber ?? '',
           position: e.position,
           department: e.department,
-          hireDate: e.hireDate,
+          hireDate: dates.date(e.hireDate),
           status: statusLabel(e.status),
+          rate: e.rate ?? 1,
+          salary: employeeCost(e),
         })),
+        total: {
+          fullName: t('reports.totalCount', { count: staff.length }),
+          rate: staff.reduce((s, e) => s + (e.rate ?? 1), 0),
+          salary: staff.reduce((s, e) => s + employeeCost(e), 0),
+        },
       };
     }
 
-    // 2. Текучесть — считается по кадровым операциям, а не по константам
-    // «4.2%» и «12», которые стояли здесь раньше.
+    // 2. Текучесть за год: по кадровым операциям и по датам в карточках —
+    // сотрудники, заведённые карточкой, а не приказом, тоже учитываются.
     if (selectedReport === 2) {
-      const rows = monthNames.map((name, index) => {
-        const inMonth = movements.filter(m => {
-          const date = new Date(m.date);
-          return date.getFullYear() === period.year && date.getMonth() === index;
-        });
-        const hired = inMonth.filter(m => m.type === 'hire').length;
-        const dismissed = inMonth.filter(m => m.type === 'dismissal').length;
-        const headcount = employees.length || 1;
-        return {
-          month: name,
-          hired,
-          dismissed,
-          turnover: `${((dismissed / headcount) * 100).toFixed(1)}%`,
-        };
-      });
-
+      const stats = turnoverByMonth(employees, movements, period.year);
       return {
         columns: [
           { key: 'month', label: t('reports.month') },
-          { key: 'hired', label: t('reports.hired') },
-          { key: 'dismissed', label: t('reports.dismissed') },
-          { key: 'turnover', label: t('reports.items.turnoverTitle') },
+          { key: 'start', label: t('reports.headcountStart'), kind: 'number' },
+          { key: 'hired', label: t('reports.hired'), kind: 'number' },
+          { key: 'dismissed', label: t('reports.dismissed'), kind: 'number' },
+          { key: 'average', label: t('reports.averageHeadcount'), kind: 'number' },
+          { key: 'turnover', label: t('reports.turnoverRate'), kind: 'percent' },
         ],
-        rows,
+        rows: stats.months.map((m, i) => ({
+          month: monthNames[i],
+          start: m.start,
+          hired: m.hired,
+          dismissed: m.dismissed,
+          average: m.average,
+          turnover: m.turnover,
+        })),
+        total: {
+          month: t('reports.total'),
+          start: stats.year.start,
+          hired: stats.year.hired,
+          dismissed: stats.year.dismissed,
+          average: stats.year.average,
+          turnover: stats.year.turnover,
+        },
       };
     }
 
-    // 3. Табель за выбранный месяц — по реальным записям, а не по
-    // пятнадцати выдуманным дням.
+    // 3. Табель за месяц: отработано, явки, часы и неявки по видам. Раньше
+    // колонка «Итого» считалась как «дни месяца минус отработанные», и
+    // выходные попадали в отсутствия.
     if (selectedReport === 3) {
-      const daysInMonth = new Date(period.year, period.month + 1, 0).getDate();
-
+      const rows = employees
+        .map(emp => {
+          const record = timesheets.find(ts => ts.employeeId === emp.id && ts.year === period.year && ts.month === period.month);
+          const totals = timesheetTotals(record?.days ?? {}, period.year, period.month, employmentOf(emp));
+          return { emp, totals };
+        })
+        .filter(({ totals }) => totals.employedDays > 0)
+        .sort((a, b) => a.emp.fullName.localeCompare(b.emp.fullName, 'ru'))
+        .map(({ emp, totals }) => {
+          const row: Record<string, string | number> = {
+            fullName: emp.fullName,
+            position: emp.position,
+            worked: totals.workDays,
+            attendances: totals.attendances,
+            hours: totals.hours,
+          };
+          for (const code of ABSENCE_CODES) row[code] = totals.codes[code] ?? 0;
+          return row;
+        });
+      const sum = (key: string) => rows.reduce((s, r) => s + Number(r[key] ?? 0), 0);
+      const total: Record<string, string | number> = { fullName: t('reports.total'), worked: sum('worked'), attendances: sum('attendances'), hours: sum('hours') };
+      for (const code of ABSENCE_CODES) total[code] = sum(code);
       return {
         columns: [
           { key: 'fullName', label: t('timeoff.colEmployee') },
-          { key: 'worked', label: t('timesheet.colWorked') },
-          { key: 'absent', label: t('reports.total') },
+          { key: 'position', label: t('employees.col.position') },
+          { key: 'worked', label: t('timesheet.colWorked'), kind: 'number' },
+          { key: 'attendances', label: t('timesheet.colAttendances'), kind: 'number' },
+          { key: 'hours', label: t('timesheet.colHours'), kind: 'number' },
+          ...ABSENCE_CODES.map(code => ({ key: code, label: code, kind: 'number' as const })),
         ],
-        rows: employees.map(emp => {
-          const record = timesheets.find(ts => ts.employeeId === emp.id);
-          // Тот же расчёт, что на экране табеля: отчёт не должен показывать
-          // другие цифры по тем же данным.
-          const totals = timesheetTotals(record?.days ?? {}, period.year, period.month);
-          return {
-            fullName: emp.fullName,
-            worked: totals.workDays,
-            absent: daysInMonth - totals.workDays,
-          };
-        }),
+        rows,
+        total,
       };
     }
 
     // 4. Кадровые движения — из таблицы movements.
     if (selectedReport === 4) {
+      const change = (from?: string | null, to?: string | null) => (!to || to === from ? (from || '—') : `${from || '—'} → ${to}`);
       return {
         columns: [
           { key: 'date', label: t('movements.date') },
           { key: 'type', label: t('movements.type') },
           { key: 'employee', label: t('movements.employee') },
-          { key: 'from', label: t('movements.was') },
-          { key: 'to', label: t('movements.became') },
+          { key: 'position', label: t('employees.col.position') },
+          { key: 'department', label: t('employees.col.department') },
           { key: 'orderNo', label: t('movements.orderNo') },
         ],
-        rows: movements.map(m => ({
-          date: m.date,
-          type: m.type === 'hire' ? t('movements.hire') : m.type === 'transfer' ? t('movements.transfer') : t('movements.dismissal'),
-          employee: employeeName(m.employeeId),
-          from: m.fromPosition ?? '—',
-          to: m.toPosition ?? '—',
-          orderNo: m.orderNo ?? '—',
-        })),
+        rows: [...movements]
+          .filter(m => m.date.startsWith(String(period.year)))
+          .sort((a, b) => b.date.localeCompare(a.date))
+          .map(m => ({
+            date: dates.date(m.date),
+            type: movementType(m.type),
+            employee: employeeName(m.employeeId, m.employeeName),
+            position: m.type === 'dismissal' ? (m.fromPosition ?? '—') : change(m.fromPosition, m.toPosition),
+            department: m.type === 'dismissal' ? (m.fromDepartment ?? '—') : change(m.fromDepartment, m.toDepartment),
+            orderNo: m.orderNo ?? '—',
+          })),
       };
     }
 
-    // 5. Штатная расстановка — оклад берётся из штатного расписания, раньше
-    // в этой колонке стояла подпись-заглушка.
+    // 5. Штатное расписание (Т-3) со сводкой: единицы, занятость,
+    // перекомплект и месячный фонд по окладам.
+    const stats = positionStats(positions, employees, departments)
+      .sort((a, b) => a.department.localeCompare(b.department, 'ru') || a.title.localeCompare(b.title, 'ru'));
     return {
       columns: [
         { key: 'department', label: t('employees.col.department') },
         { key: 'position', label: t('employees.col.position') },
-        { key: 'total', label: t('orgchart.staffUnits') },
-        { key: 'occupied', label: t('orgchart.occupied') },
-        { key: 'vacant', label: t('orgchart.vacant') },
-        { key: 'salary', label: t('employees.col.salary') },
+        { key: 'total', label: t('orgchart.staffUnits'), kind: 'number' },
+        { key: 'occupied', label: t('orgchart.occupied'), kind: 'number' },
+        { key: 'vacant', label: t('orgchart.vacant'), kind: 'number' },
+        { key: 'over', label: t('orgchart.over'), kind: 'number' },
+        { key: 'salary', label: t('orgchart.salary'), kind: 'money' },
+        { key: 'fund', label: t('reports.fund'), kind: 'money' },
       ],
-      // Занятость считается тем же кодом, что и в оргструктуре.
-      rows: positionStats(positions, employees, departments).map(stat => ({
+      rows: stats.map(stat => ({
         department: stat.department,
         position: stat.title,
         total: stat.total,
         occupied: stat.occupied,
         vacant: stat.vacant,
-        salary: money.format(stat.salary),
+        over: stat.over,
+        salary: stat.salary,
+        fund: stat.total * stat.salary,
       })),
+      total: {
+        department: t('reports.total'),
+        total: stats.reduce((s, x) => s + x.total, 0),
+        occupied: stats.reduce((s, x) => s + x.occupied, 0),
+        vacant: stats.reduce((s, x) => s + x.vacant, 0),
+        over: stats.reduce((s, x) => s + x.over, 0),
+        fund: stats.reduce((s, x) => s + x.total * x.salary, 0),
+      },
     };
-  }, [selectedReport, employees, positions, departments, timesheets, movements, period, monthNames, money, t]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedReport, employees, positions, departments, timesheets, movements, period, monthNames, money, dates, t]);
+
+  const display = (col: ReportColumn, value: Cell) => {
+    if (value === undefined || value === '') return '';
+    if (col.kind === 'money') return money.format(Number(value));
+    if (col.kind === 'percent') return `${Number(value).toFixed(1)}%`;
+    if (col.kind === 'number' && typeof value === 'number' && !Number.isInteger(value)) return value.toFixed(2);
+    return String(value);
+  };
+
+  // В Excel числа уходят числами (с форматом), а не текстом «6 000 TMT»:
+  // иначе их нельзя сложить в самой таблице.
+  const excelValue = (col: ReportColumn, value: Cell) => {
+    if (value === undefined || value === '') return '';
+    if (col.kind === 'percent') return Number(value) / 100;
+    return value;
+  };
 
   const handleExportReport = async () => {
     if (!reportTable) return;
-    const rows = reportTable.rows.map(row => {
-      const out: Record<string, string | number> = {};
-      for (const col of reportTable.columns) out[col.label] = row[col.key];
-      return out;
+    const all = reportTable.total ? [...reportTable.rows, reportTable.total] : reportTable.rows;
+    const rows = all.map(row => Object.fromEntries(reportTable.columns.map(col => [col.label, excelValue(col, row[col.key])])));
+    const numberFormats: Record<string, string> = {};
+    for (const col of reportTable.columns) {
+      if (col.kind === 'money') numberFormats[col.label] = '#,##0.00';
+      if (col.kind === 'percent') numberFormats[col.label] = '0.0%';
+    }
+    const title = reports.find(r => r.id === selectedReport)?.title ?? 'Report';
+    await exportToExcel(rows, `${title}_${fileStamp()}`, {
+      sheetName: title,
+      numberFormats,
+      columns: reportTable.columns.map(c => c.label),
     });
-    await exportToExcel(rows, `Report-${selectedReport}`);
+  };
+
+  const handleExportReportPdf = async () => {
+    if (!reportTable) return;
+    const title = reports.find(r => r.id === selectedReport)?.title ?? 'Report';
+    const periodText = selectedReport === 3 ? `${monthNames[period.month]} ${period.year}`
+      : selectedReport === 2 || selectedReport === 4 ? String(period.year) : dates.date(new Date().toISOString().slice(0, 10));
+    try {
+      await exportTablePdf({
+        title,
+        subtitle: periodText,
+        columns: reportTable.columns.map(c => ({ label: c.label, align: c.kind && c.kind !== 'text' ? 'right' as const : 'left' as const })),
+        rows: reportTable.rows.map(row => reportTable.columns.map(col => display(col, row[col.key]))),
+        footer: reportTable.total ? reportTable.columns.map(col => display(col, reportTable.total![col.key])) : undefined,
+        fileName: `${title}_${fileStamp()}`,
+      });
+    } catch (e) {
+      console.error('PDF export failed', e);
+      notify.error(t('archive.pdfFailed'));
+    }
   };
 
   // ---- Конструктор ----
 
-  // Конструктор работает с произвольными сущностями, поэтому строки здесь
-  // намеренно обезличены до записей: колонки выбирает пользователь.
-  const sources: { id: SourceId; label: string; rows: Record<string, unknown>[] }[] = [
-    { id: 'employees', label: t('reports.srcEmployees'), rows: employees as unknown as Record<string, unknown>[] },
-    { id: 'positions', label: t('reports.srcPositions'), rows: positions as unknown as Record<string, unknown>[] },
-    { id: 'timesheets', label: t('reports.srcTimesheets'), rows: timesheets as unknown as Record<string, unknown>[] },
-    { id: 'archives', label: t('reports.srcArchives'), rows: archives as unknown as Record<string, unknown>[] },
-    { id: 'movements', label: t('reports.srcMovements'), rows: movements as unknown as Record<string, unknown>[] },
-    { id: 'candidates', label: t('reports.srcCandidates'), rows: candidates as unknown as Record<string, unknown>[] },
-  ];
+  const departmentName = (id: unknown) => departments.find(d => d.id === id)?.name ?? String(id ?? '');
+
+  // Строки источников уже «очеловечены»: вместо идентификаторов — имена,
+  // вместо кодов статусов — подписи, даты — в формате из настроек. Табель
+  // разворачивается в итоги, а не в JSON дней.
+  const sources = useMemo<{ id: SourceId; label: string; rows: Record<string, unknown>[] }[]>(() => [
+    {
+      id: 'employees', label: t('reports.srcEmployees'),
+      rows: employees.map(e => ({
+        fullName: e.fullName, tabNumber: e.tabNumber ?? '', position: e.position, department: e.department,
+        status: statusLabel(e.status), hireDate: dates.date(e.hireDate), dismissalDate: e.dismissalDate ? dates.date(e.dismissalDate) : '',
+        birthDate: e.birthDate ? dates.date(e.birthDate) : '', paymentType: t(`employees.form.pay.${e.paymentType ?? 'salary'}`),
+        salary: e.salary ?? 0, rate: e.rate ?? 1,
+      })),
+    },
+    {
+      id: 'positions', label: t('reports.srcPositions'),
+      rows: positions.map(p => ({ department: departmentName(p.departmentId), title: p.title, maxCount: p.maxCount, salary: p.salary })),
+    },
+    {
+      id: 'timesheets', label: `${t('reports.srcTimesheets')} (${monthNames[period.month]} ${period.year})`,
+      rows: employees
+        .map(emp => ({ emp, totals: timesheetTotals(timesheets.find(ts => ts.employeeId === emp.id && ts.year === period.year && ts.month === period.month)?.days ?? {}, period.year, period.month, employmentOf(emp)) }))
+        .filter(({ totals }) => totals.employedDays > 0)
+        .map(({ emp, totals }) => ({
+          fullName: emp.fullName, department: emp.department, position: emp.position,
+          workDays: totals.workDays, attendances: totals.attendances, hours: totals.hours,
+        })),
+    },
+    {
+      id: 'archives', label: `${t('reports.srcArchives')} (${period.year})`,
+      rows: archives.map(a => ({ year: a.year, month: monthNames[a.month - 1] ?? a.month, fullName: a.employeeName, department: a.department, position: a.position, salary: a.salary, hoursWorked: a.hoursWorked })),
+    },
+    {
+      id: 'movements', label: t('reports.srcMovements'),
+      rows: movements.map(m => ({
+        date: dates.date(m.date), type: movementType(m.type), fullName: employeeName(m.employeeId, m.employeeName),
+        fromPosition: m.fromPosition ?? '', toPosition: m.toPosition ?? '', fromDepartment: m.fromDepartment ?? '', toDepartment: m.toDepartment ?? '',
+        fromSalary: m.fromSalary, toSalary: m.toSalary, orderNo: m.orderNo ?? '', reason: m.reason ?? '',
+      })),
+    },
+    {
+      id: 'candidates', label: t('reports.srcCandidates'),
+      // Этап — подписью воронки, а не кодом «screening».
+      rows: candidates.map(c => ({
+        fullName: c.fullName, position: c.position, experience: c.experience ?? '',
+        status: t(`recruiting.col.${c.status}`, { defaultValue: c.status }),
+        createdAt: c.createdAt ? dates.date(c.createdAt) : '', note: c.note ?? '',
+      })),
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [employees, positions, departments, timesheets, archives, movements, candidates, period, dates, t]);
+
+  const fieldLabel = (field: string) => t(`reports.fieldNames.${field}`, { defaultValue: field });
 
   const [source, setSource] = useState<SourceId>('employees');
   const [selectedFields, setSelectedFields] = useState<string[]>([]);
@@ -216,12 +378,12 @@ export default function Reports() {
   const [groupBy, setGroupBy] = useState('');
   const [presetName, setPresetName] = useState('');
 
-  const sourceRows = sources.find(s => s.id === source)?.rows ?? [];
+  const sourceRows = useMemo(() => sources.find(s => s.id === source)?.rows ?? [], [sources, source]);
 
   const availableFields = useMemo(() => {
     const keys = new Set<string>();
     for (const row of sourceRows.slice(0, 50)) {
-      Object.keys(row).forEach(k => keys.add(k));
+      Object.keys(row).filter(k => !HIDDEN_FIELDS.has(k)).forEach(k => keys.add(k));
     }
     return Array.from(keys);
   }, [sourceRows]);
@@ -260,7 +422,7 @@ export default function Reports() {
     if (!activeGroupBy) return projected;
     // Группировка — сортировка по ключу: строки одной группы идут подряд,
     // а сам ключ остаётся колонкой, поэтому выгрузка не теряет структуру.
-    return projected.slice().sort((a, b) => String(a[activeGroupBy]).localeCompare(String(b[activeGroupBy])));
+    return projected.slice().sort((a, b) => String(a[activeGroupBy]).localeCompare(String(b[activeGroupBy]), 'ru'));
   }, [sourceRows, activeFilterField, filterValue, activeFields, activeGroupBy]);
 
   const toggleField = (field: string) => {
@@ -274,13 +436,12 @@ export default function Reports() {
       config: JSON.stringify({ source, selectedFields: activeFields, filterField: activeFilterField, filterValue, groupBy: activeGroupBy }),
     });
     setPresetName('');
+    notify.success(t('reports.presetSaved'));
   };
 
   const applyPreset = (preset: ReportPreset) => {
     try {
       const config = JSON.parse(preset.config);
-      // Порядок больше не важен: выбор полей выводится, а не восстанавливается
-      // эффектом, поэтому setTimeout здесь не нужен.
       setSource(config.source ?? 'employees');
       setSelectedFields(config.selectedFields ?? []);
       setFilterField(config.filterField ?? '');
@@ -291,22 +452,54 @@ export default function Reports() {
     }
   };
 
-  const handleBuilderExcel = async () => {
-    if (builderRows.length === 0) return;
-    await exportToExcel(builderRows, `Report-${source}`);
+  const deletePreset = async (preset: ReportPreset) => {
+    if (!(await notify.confirm(t('reports.presetDeleteConfirm', { name: preset.name }), { danger: true }))) return;
+    await removeFrom(TABLES.reportPresets, preset.id);
   };
 
-  const handleBuilderJson = () => {
-    const blob = new Blob([JSON.stringify(builderRows, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `report-${source}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
+  const labelledRows = () => builderRows.map(row => Object.fromEntries(activeFields.map(f => [fieldLabel(f), row[f]])));
+
+  const handleBuilderExcel = async () => {
+    if (builderRows.length === 0) return;
+    const label = sources.find(s => s.id === source)?.label ?? source;
+    await exportToExcel(labelledRows(), `${label}_${fileStamp()}`, { sheetName: label });
+  };
+
+  const handleBuilderJson = async () => {
+    if (builderRows.length === 0) return;
+    await saveText(JSON.stringify(builderRows, null, 2), `report-${source}_${fileStamp()}.json`, 'application/json');
   };
 
   const control = 'w-full bg-app border border-line rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 text-primary';
+  const needsMonth = selectedReport === 3 || (activeTab === 'constructor' && source === 'timesheets');
+  const needsYear = selectedReport === 2 || selectedReport === 3 || selectedReport === 4
+    || (activeTab === 'constructor' && (source === 'timesheets' || source === 'archives'));
+
+  const periodControls = (
+    <>
+      {needsMonth && (
+        <select
+          aria-label={t('reports.month')}
+          value={period.month}
+          onChange={(e) => setPeriod({ ...period, month: Number(e.target.value) })}
+          className="bg-app border border-line rounded-xl px-3 py-2 text-sm text-primary"
+        >
+          {monthNames.map((name, i) => <option key={name} value={i}>{name}</option>)}
+        </select>
+      )}
+      {needsYear && (
+        <input
+          type="number"
+          aria-label={t('reports.year')}
+          value={period.year}
+          min={2000}
+          max={2100}
+          onChange={(e) => setPeriod({ ...period, year: Number(e.target.value) || now.getFullYear() })}
+          className="w-24 bg-app border border-line rounded-xl px-3 py-2 text-sm text-primary"
+        />
+      )}
+    </>
+  );
 
   const renderReportContent = () => {
     if (!selectedReport || !reportTable) {
@@ -326,34 +519,26 @@ export default function Reports() {
             <h3 className="font-semibold text-lg text-primary">{report?.title}</h3>
             <p className="text-sm text-muted">{report?.desc}</p>
           </div>
-          <div className="flex items-center gap-3">
-            {(selectedReport === 2 || selectedReport === 3) && (
-              <>
-                {selectedReport === 3 && (
-                  <select
-                    value={period.month}
-                    onChange={(e) => setPeriod({ ...period, month: Number(e.target.value) })}
-                    className="bg-app border border-line rounded-xl px-3 py-2 text-sm text-primary"
-                  >
-                    {monthNames.map((name, i) => <option key={name} value={i}>{name}</option>)}
-                  </select>
-                )}
-                <input
-                  type="number"
-                  value={period.year}
-                  onChange={(e) => setPeriod({ ...period, year: Number(e.target.value) })}
-                  className="w-24 bg-app border border-line rounded-xl px-3 py-2 text-sm text-primary"
-                />
-              </>
-            )}
+          <div className="flex flex-wrap items-center gap-3">
+            {periodControls}
             <button
               onClick={handleExportReport}
               className="flex items-center gap-2 bg-surface-3 hover:bg-surface-hover border border-strong px-4 py-2 rounded-xl text-sm font-medium transition-colors"
             >
               <Download className="w-4 h-4" /> {t('reports.downloadExcel')}
             </button>
+            <button
+              onClick={handleExportReportPdf}
+              className="flex items-center gap-2 bg-surface-3 hover:bg-surface-hover border border-strong px-4 py-2 rounded-xl text-sm font-medium transition-colors"
+            >
+              <Download className="w-4 h-4" /> PDF
+            </button>
           </div>
         </div>
+
+        {selectedReport === 3 && (
+          <p className="px-6 pt-4 text-xs text-muted">{t('reports.timesheetLegend')}</p>
+        )}
 
         <div className="p-6 overflow-auto custom-scrollbar flex-1">
           <table className="w-full text-sm text-left">
@@ -362,7 +547,7 @@ export default function Reports() {
                 {reportTable.columns.map((col, i) => (
                   <th
                     key={col.key}
-                    className={`p-table text-table ${i === 0 ? 'rounded-tl-xl' : ''} ${i === reportTable.columns.length - 1 ? 'rounded-tr-xl' : ''}`}
+                    className={`p-table text-table ${col.kind && col.kind !== 'text' ? 'text-right' : ''} ${i === 0 ? 'rounded-tl-xl' : ''} ${i === reportTable.columns.length - 1 ? 'rounded-tr-xl' : ''}`}
                   >
                     {col.label}
                   </th>
@@ -373,8 +558,8 @@ export default function Reports() {
               {reportTable.rows.map((row, i) => (
                 <tr key={i} className="border-b border-line hover:bg-surface-hover">
                   {reportTable.columns.map((col, j) => (
-                    <td key={col.key} className={`p-table text-table ${j === 0 ? 'font-medium text-primary' : 'text-muted'}`}>
-                      {row[col.key]}
+                    <td key={col.key} className={`p-table text-table ${j === 0 ? 'font-medium text-primary' : 'text-secondary'} ${col.kind && col.kind !== 'text' ? 'text-right tabular-nums' : ''}`}>
+                      {display(col, row[col.key])}
                     </td>
                   ))}
                 </tr>
@@ -387,6 +572,17 @@ export default function Reports() {
                 </tr>
               )}
             </tbody>
+            {reportTable.total && reportTable.rows.length > 0 && (
+              <tfoot>
+                <tr className="bg-surface-3 font-semibold text-primary" data-testid="report-total">
+                  {reportTable.columns.map(col => (
+                    <td key={col.key} className={`p-table text-table ${col.kind && col.kind !== 'text' ? 'text-right tabular-nums' : ''}`}>
+                      {display(col, reportTable.total![col.key])}
+                    </td>
+                  ))}
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
       </div>
@@ -398,52 +594,59 @@ export default function Reports() {
       <div className="p-6 border-b border-line bg-surface-2 space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <label className="block text-xs font-medium text-muted mb-2">{t('reports.source')}</label>
-            <select value={source} onChange={(e) => setSource(e.target.value as SourceId)} className={control}>
-              {sources.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-            </select>
+            <label htmlFor="rb-source" className="block text-xs font-medium text-muted mb-2">{t('reports.source')}</label>
+            <div className="flex gap-2">
+              <select id="rb-source" value={source} onChange={(e) => setSource(e.target.value as SourceId)} className={control}>
+                {sources.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+              </select>
+            </div>
+            {(source === 'timesheets' || source === 'archives') && (
+              <div className="flex gap-2 mt-2">{periodControls}</div>
+            )}
           </div>
           <div>
-            <label className="block text-xs font-medium text-muted mb-2">{t('reports.filterField')}</label>
-            <select value={activeFilterField} onChange={(e) => setFilterField(e.target.value)} className={control}>
+            <label htmlFor="rb-filter-field" className="block text-xs font-medium text-muted mb-2">{t('reports.filterField')}</label>
+            <select id="rb-filter-field" value={activeFilterField} onChange={(e) => setFilterField(e.target.value)} className={control}>
               <option value="">{t('reports.anyField')}</option>
-              {availableFields.map(f => <option key={f} value={f}>{f}</option>)}
+              {availableFields.map(f => <option key={f} value={f}>{fieldLabel(f)}</option>)}
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-muted mb-2">{t('reports.filterValue')}</label>
-            <input value={filterValue} onChange={(e) => setFilterValue(e.target.value)} className={control} />
+            <label htmlFor="rb-filter-value" className="block text-xs font-medium text-muted mb-2">{t('reports.filterValue')}</label>
+            <input id="rb-filter-value" value={filterValue} onChange={(e) => setFilterValue(e.target.value)} className={control} />
           </div>
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-muted mb-2">{t('reports.fields')}</label>
+          <span className="block text-xs font-medium text-muted mb-2">{t('reports.fields')}</span>
           <div className="flex flex-wrap gap-2">
             {availableFields.map(field => (
               <button
                 key={field}
+                aria-pressed={activeFields.includes(field)}
                 onClick={() => toggleField(field)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${activeFields.includes(field) ? 'bg-accent-500/20 text-accent-400 border-accent-500/40' : 'bg-surface-3 text-muted border-line hover:bg-surface-hover'}`}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${activeFields.includes(field) ? 'bg-accent-500/20 text-accent-800 dark:text-accent-300 border-accent-500/40' : 'bg-surface-3 text-secondary border-line hover:bg-surface-hover'}`}
               >
-                {field}
+                {fieldLabel(field)}
               </button>
             ))}
+            {availableFields.length === 0 && <span className="text-xs text-muted">{t('reports.noData')}</span>}
           </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
           <div>
-            <label className="block text-xs font-medium text-muted mb-2">{t('reports.groupBy')}</label>
-            <select value={activeGroupBy} onChange={(e) => setGroupBy(e.target.value)} className={control}>
+            <label htmlFor="rb-group" className="block text-xs font-medium text-muted mb-2">{t('reports.groupBy')}</label>
+            <select id="rb-group" value={activeGroupBy} onChange={(e) => setGroupBy(e.target.value)} className={control}>
               <option value="">{t('reports.noGrouping')}</option>
-              {activeFields.map(f => <option key={f} value={f}>{f}</option>)}
+              {activeFields.map(f => <option key={f} value={f}>{fieldLabel(f)}</option>)}
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-muted mb-2">{t('reports.presetName')}</label>
-            <input value={presetName} onChange={(e) => setPresetName(e.target.value)} className={control} />
+            <label htmlFor="rb-preset" className="block text-xs font-medium text-muted mb-2">{t('reports.presetName')}</label>
+            <input id="rb-preset" value={presetName} onChange={(e) => setPresetName(e.target.value)} className={control} />
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={handleSavePreset}
               disabled={!presetName.trim()}
@@ -454,7 +657,7 @@ export default function Reports() {
             <button
               onClick={handleBuilderExcel}
               disabled={builderRows.length === 0}
-              className="flex items-center gap-2 bg-accent-500 hover:bg-accent-600 disabled:opacity-50 text-white px-3 py-2 rounded-xl text-sm font-medium transition-colors"
+              className="flex items-center gap-2 bg-accent-600 hover:bg-accent-700 disabled:opacity-50 text-white px-3 py-2 rounded-xl text-sm font-medium transition-colors"
             >
               <Download className="w-4 h-4" /> Excel
             </button>
@@ -470,16 +673,24 @@ export default function Reports() {
 
         {reportPresets.length > 0 && (
           <div>
-            <label className="block text-xs font-medium text-muted mb-2">{t('reports.presets')}</label>
+            <span className="block text-xs font-medium text-muted mb-2">{t('reports.presets')}</span>
             <div className="flex flex-wrap gap-2">
               {reportPresets.map(preset => (
-                <button
-                  key={preset.id}
-                  onClick={() => applyPreset(preset)}
-                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-surface-3 text-secondary border border-line hover:bg-surface-hover transition-colors"
-                >
-                  {preset.name}
-                </button>
+                <span key={preset.id} className="inline-flex items-center rounded-lg bg-surface-3 border border-line">
+                  <button
+                    onClick={() => applyPreset(preset)}
+                    className="px-3 py-1.5 text-xs font-medium text-secondary hover:text-primary transition-colors"
+                  >
+                    {preset.name}
+                  </button>
+                  <button
+                    onClick={() => deletePreset(preset)}
+                    aria-label={t('reports.presetDelete', { name: preset.name })}
+                    className="px-2 py-1.5 text-muted hover:text-rose-600 border-l border-line"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </span>
               ))}
             </div>
           </div>
@@ -496,7 +707,7 @@ export default function Reports() {
             <thead className="text-xs text-muted uppercase bg-surface-3">
               <tr>
                 {activeFields.map(field => (
-                  <th key={field} className="p-table text-table">{field}</th>
+                  <th key={field} className="p-table text-table">{fieldLabel(field)}</th>
                 ))}
               </tr>
             </thead>
@@ -504,7 +715,7 @@ export default function Reports() {
               {builderRows.slice(0, 200).map((row, i) => (
                 <tr key={i} className="border-b border-line hover:bg-surface-hover">
                   {activeFields.map(field => (
-                    <td key={field} className="p-table text-table text-muted">{row[field]}</td>
+                    <td key={field} className="p-table text-table text-secondary">{row[field]}</td>
                   ))}
                 </tr>
               ))}
@@ -526,18 +737,22 @@ export default function Reports() {
     <div className="space-y-6 h-[calc(100vh-8rem)] flex flex-col">
       <h2 className="text-2xl font-semibold tracking-tight">{t('nav.reports')}</h2>
 
-      <div className="flex gap-1">
+      <div className="flex gap-1" role="tablist">
         <button
+          role="tab"
+          aria-selected={activeTab === 'catalog'}
           onClick={() => { setActiveTab('catalog'); setSelectedReport(null); }}
-          className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${activeTab === 'catalog' ? 'bg-surface-3 text-primary' : 'text-muted hover:bg-surface-hover'}`}
+          className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${activeTab === 'catalog' ? 'bg-surface-3 text-primary' : 'text-secondary hover:bg-surface-hover'}`}
         >
           {t('reports.catalog')}
         </button>
         <button
+          role="tab"
+          aria-selected={activeTab === 'constructor'}
           onClick={() => setActiveTab('constructor')}
-          className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${activeTab === 'constructor' ? 'bg-surface-3 text-primary' : 'text-muted hover:bg-surface-hover'}`}
+          className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${activeTab === 'constructor' ? 'bg-surface-3 text-primary' : 'text-secondary hover:bg-surface-hover'}`}
         >
-          {t('reports.constructorBeta')}
+          {t('reports.constructorTitle')}
         </button>
       </div>
 
@@ -549,10 +764,11 @@ export default function Reports() {
               <button
                 key={report.id}
                 onClick={() => setSelectedReport(report.id)}
+                aria-pressed={selectedReport === report.id}
                 className={`flex items-center gap-4 p-4 rounded-2xl border transition-colors text-left group ${selectedReport === report.id ? 'bg-surface-3 border-accent-500' : 'bg-surface-3 border-line hover:bg-surface-hover'}`}
               >
                 <div className="w-12 h-12 rounded-xl bg-surface-4 flex items-center justify-center flex-shrink-0 group-hover:bg-accent-600/20 transition-colors">
-                  <report.icon className="w-6 h-6 text-muted group-hover:text-accent-400" />
+                  <report.icon className="w-6 h-6 text-muted group-hover:text-accent-500" />
                 </div>
                 <div>
                   <h4 className="font-medium text-primary">{report.title}</h4>

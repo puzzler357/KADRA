@@ -8,12 +8,14 @@ import { ENTITIES, ENTITY_BY_TABLE, TABLES } from '../data/entities';
 import type {
   Employee, Department, Position, TimesheetRecord, ArchiveRecord, ArchiveFilters, Template,
   Candidate, TimeOffRequest, ChecklistTask, Goal, Review, KbCategory, KbArticle, Movement, AuditEntry, ReportPreset, BackupEntry,
+  StaffingRevision, ReviewCycle,
 } from '../data/types';
 
 // Ре-экспорт типов: страницы импортируют их из этого модуля.
 export type {
   Employee, Department, Position, TimesheetRecord, ArchiveRecord, ArchiveFilters, Template,
-  Candidate, TimeOffRequest, ChecklistTask, Goal, Review, KbCategory, KbArticle, Movement, MovementType, AuditEntry, ReportPreset, BackupEntry,
+  Candidate, CandidateStatus, TimeOffRequest, ChecklistTask, Goal, Review, KbCategory, KbArticle, Movement, MovementType, AuditEntry, ReportPreset, BackupEntry,
+  StaffingRevision, ReviewCycle,
 } from '../data/types';
 export { TABLES } from '../data/entities';
 
@@ -44,9 +46,10 @@ function blockedByLicense(): boolean {
 
 interface DatabaseState {
   employees: Employee[];
-  addEmployee: (emp: Omit<Employee, 'id'>) => void;
-  updateEmployee: (id: string, emp: Partial<Employee>) => void;
-  deleteEmployee: (id: string) => void;
+  /** Ошибки слоя данных пробрасываются: экран показывает их и не закрывает форму. */
+  addEmployee: (emp: Omit<Employee, 'id'>) => Promise<void>;
+  updateEmployee: (id: string, emp: Partial<Employee>) => Promise<void>;
+  deleteEmployee: (id: string) => Promise<void>;
   setEmployees: (emps: Employee[]) => void;
   /** Массовый импорт: пишет строки в БД одной транзакцией и добавляет их в стор. */
   importEmployees: (rows: Omit<Employee, 'id'>[]) => Promise<number>;
@@ -58,18 +61,20 @@ interface DatabaseState {
 
   archives: ArchiveRecord[];
   /** Значения для фильтров архива, считанные по всей таблице. */
-  archiveFacets: { years: number[]; departments: string[] };
+  archiveFacets: { years: number[]; departments: string[]; employees: { id: string; name: string }[] };
   departments: Department[];
   positions: Position[];
   addArchive: (record: Omit<ArchiveRecord, 'id'>) => void;
   deleteArchive: (id: string) => void;
   templates: Template[];
-  addTemplate: (template: Omit<Template, 'id'>) => void;
-  updateTemplate: (id: string, template: Partial<Template>) => void;
-  deleteTemplate: (id: string) => void;
-  addDepartment: (dep: Omit<Department, 'id'>) => Promise<void>;
+  addTemplate: (template: Omit<Template, 'id'>) => Promise<string | undefined>;
+  updateTemplate: (id: string, template: Partial<Template>) => Promise<void>;
+  deleteTemplate: (id: string) => Promise<void>;
+  addDepartment: (dep: Omit<Department, 'id'>) => Promise<string | undefined>;
+  /** Переименование подразделения проходит и по карточкам сотрудников. */
   updateDepartment: (id: string, data: Partial<Department>) => Promise<void>;
-  deleteDepartment: (id: string) => Promise<void>;
+  /** Возвращает, сколько должностей удалено вместе с подразделением. */
+  deleteDepartment: (id: string) => Promise<number>;
   // Экраны подбора, отпусков, онбординга, оценки и базы знаний.
   candidates: Candidate[];
   timeOffRequests: TimeOffRequest[];
@@ -82,6 +87,8 @@ interface DatabaseState {
   auditLog: AuditEntry[];
   reportPresets: ReportPreset[];
   backups: BackupEntry[];
+  staffingRevisions: StaffingRevision[];
+  reviewCycles: ReviewCycle[];
 
   addPosition: (pos: Omit<Position, 'id'>) => Promise<void>;
   updatePosition: (id: string, data: Partial<Position>) => Promise<void>;
@@ -120,13 +127,13 @@ interface FetchActions {
 }
 
 export const useDatabaseStore = create<DatabaseState & FetchActions & EntityActions>()(
-  (set) => ({
+  (set, get) => ({
     employees: [],
     departments: [],
     positions: [],
     timesheets: [],
     archives: [],
-    archiveFacets: { years: [], departments: [] },
+    archiveFacets: { years: [], departments: [], employees: [] },
     templates: [],
 
     candidates: [],
@@ -140,6 +147,8 @@ export const useDatabaseStore = create<DatabaseState & FetchActions & EntityActi
     auditLog: [],
     reportPresets: [],
     backups: [],
+    staffingRevisions: [],
+    reviewCycles: [],
 
     loading: false,
     error: null,
@@ -245,17 +254,19 @@ export const useDatabaseStore = create<DatabaseState & FetchActions & EntityActi
     addEmployee: async (emp) => {
       if (blockedByLicense()) return;
       const { id } = await api.createEmployee(emp);
-      set((state) => ({ employees: [...state.employees, { id, ...emp }] }));
+      set((state) => ({ employees: [...state.employees, { ...emp, id }] }));
     },
+    // Сначала база, потом стор: при отказе (проверка полей, лицензия) экран
+    // не должен показывать правку, которой нет в базе.
     updateEmployee: async (id, updated) => {
       if (blockedByLicense()) return;
-      set((state) => ({ employees: state.employees.map((e) => (e.id === id ? { ...e, ...updated } : e)) }));
       await api.updateEmployee(id, updated);
+      set((state) => ({ employees: state.employees.map((e) => (e.id === id ? { ...e, ...updated } : e)) }));
     },
     deleteEmployee: async (id) => {
       if (blockedByLicense()) return;
-      set((state) => ({ employees: state.employees.filter((e) => e.id !== id) }));
       await api.deleteEmployee(id);
+      set((state) => ({ employees: state.employees.filter((e) => e.id !== id) }));
     },
     setEmployees: (emps) => {
       set({ employees: emps });
@@ -271,47 +282,57 @@ export const useDatabaseStore = create<DatabaseState & FetchActions & EntityActi
       return created.length;
     },
 
+    // Справочники структуры. Раньше ошибки здесь глотались в консоль, окно
+    // закрывалось, и человек не узнавал, что ничего не сохранилось.
     addDepartment: async (dep) => {
-      if (blockedByLicense()) return;
-      try {
-        const { id } = await api.createDepartment(dep);
-        set((s) => ({ departments: [...s.departments, { ...dep, id }] }));
-      } catch (e) { console.error(e); }
+      if (blockedByLicense()) return undefined;
+      const { id } = await api.createDepartment(dep);
+      set((s) => ({ departments: [...s.departments, { ...dep, name: dep.name.trim(), parentId: dep.parentId || null, id }] }));
+      return id;
     },
     updateDepartment: async (id, data) => {
       if (blockedByLicense()) return;
-      try {
-        await api.updateDepartment(id, data);
-        set((s) => ({ departments: s.departments.map((d) => (d.id === id ? { ...d, ...data } : d)) }));
-      } catch (e) { console.error(e); }
+      const before = get().departments.find((d) => d.id === id);
+      await api.updateDepartment(id, data);
+      const name = data.name !== undefined ? data.name.trim() : before?.name ?? '';
+      set((s) => ({
+        departments: s.departments.map((d) => (d.id === id ? { ...d, ...data, name } : d)),
+        employees: before && name !== before.name
+          ? s.employees.map((e) => (e.department === before.name ? { ...e, department: name } : e))
+          : s.employees,
+      }));
     },
     deleteDepartment: async (id) => {
-      if (blockedByLicense()) return;
-      try {
-        await api.deleteDepartment(id);
-        set((s) => ({ departments: s.departments.filter((d) => d.id !== id) }));
-      } catch (e) { console.error(e); }
+      if (blockedByLicense()) return 0;
+      const { deletedPositions } = await api.deleteDepartment(id);
+      set((s) => ({
+        departments: s.departments.filter((d) => d.id !== id),
+        positions: s.positions.filter((p) => p.departmentId !== id),
+      }));
+      return deletedPositions;
     },
     addPosition: async (pos) => {
       if (blockedByLicense()) return;
-      try {
-        const { id } = await api.createPosition(pos);
-        set((s) => ({ positions: [...s.positions, { ...pos, id }] }));
-      } catch (e) { console.error(e); }
+      const { id } = await api.createPosition(pos);
+      set((s) => ({ positions: [...s.positions, { ...pos, title: pos.title.trim(), id }] }));
     },
     updatePosition: async (id, data) => {
       if (blockedByLicense()) return;
-      try {
-        await api.updatePosition(id, data);
-        set((s) => ({ positions: s.positions.map((p) => (p.id === id ? { ...p, ...data } : p)) }));
-      } catch (e) { console.error(e); }
+      const before = get().positions.find((p) => p.id === id);
+      await api.updatePosition(id, data);
+      const title = data.title !== undefined ? data.title.trim() : before?.title ?? '';
+      const depName = get().departments.find((d) => d.id === before?.departmentId)?.name;
+      set((s) => ({
+        positions: s.positions.map((p) => (p.id === id ? { ...p, ...data, title } : p)),
+        employees: before && title !== before.title && depName !== undefined
+          ? s.employees.map((e) => (e.department === depName && e.position === before.title ? { ...e, position: title } : e))
+          : s.employees,
+      }));
     },
     deletePosition: async (id) => {
       if (blockedByLicense()) return;
-      try {
-        await api.deletePosition(id);
-        set((s) => ({ positions: s.positions.filter((p) => p.id !== id) }));
-      } catch (e) { console.error(e); }
+      await api.deletePosition(id);
+      set((s) => ({ positions: s.positions.filter((p) => p.id !== id) }));
     },
 
     addTimesheet: async (record) => {
@@ -341,20 +362,23 @@ export const useDatabaseStore = create<DatabaseState & FetchActions & EntityActi
       await api.deleteArchive(id);
     },
 
+    // Сначала база, потом стор: при ошибке экран показывает причину, а не
+    // шаблон, который после перезапуска исчезнет.
     addTemplate: async (template) => {
-      if (blockedByLicense()) return;
+      if (blockedByLicense()) return undefined;
       const { id } = await api.createTemplate(template);
       set((state) => ({ templates: [...state.templates, { id, ...template }] }));
+      return id;
     },
     updateTemplate: async (id, updated) => {
       if (blockedByLicense()) return;
-      set((state) => ({ templates: state.templates.map((t) => (t.id === id ? { ...t, ...updated } : t)) }));
       await api.updateTemplate(id, updated);
+      set((state) => ({ templates: state.templates.map((t) => (t.id === id ? { ...t, ...updated } : t)) }));
     },
     deleteTemplate: async (id) => {
       if (blockedByLicense()) return;
-      set((state) => ({ templates: state.templates.filter((t) => t.id !== id) }));
       await api.deleteTemplate(id);
+      set((state) => ({ templates: state.templates.filter((t) => t.id !== id) }));
     },
   }),
 );

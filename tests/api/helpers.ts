@@ -27,15 +27,19 @@ export async function stopApi(): Promise<void> {
 
 type Method = 'GET' | 'POST' | 'PUT' | 'DELETE';
 
-/** Обёртка над fetch: возвращает статус и разобранное тело. */
+/** Обёртка над fetch: возвращает статус и разобранное тело. token — сессия (Bearer). */
 export async function api<T = any>(
   method: Method,
   route: string,
-  body?: unknown
+  body?: unknown,
+  token?: string,
 ): Promise<{ status: number; body: T }> {
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(baseUrl + route, {
     method,
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await res.text();

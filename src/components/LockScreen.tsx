@@ -33,11 +33,12 @@ export default function LockScreen() {
     setError('');
     setLoading(true);
     try {
-      await api.login(user.email, password);
+      await api.login(password);
       setPassword('');
       unlock();
-    } catch {
-      setError(t('login.failed'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('login.failed'));
+      setPassword('');
     } finally {
       setLoading(false);
     }
@@ -46,7 +47,7 @@ export default function LockScreen() {
   return (
     <div className="fixed inset-0 z-[100] bg-[var(--background)] flex flex-col items-center justify-center p-6">
       <div className="w-full max-w-sm text-center">
-        <div className="w-16 h-16 rounded-2xl bg-surface-3 text-accent-400 flex items-center justify-center mx-auto mb-6">
+        <div className="w-16 h-16 rounded-2xl bg-surface-3 text-accent-700 dark:text-accent-300 flex items-center justify-center mx-auto mb-6">
           <Lock className="w-8 h-8" />
         </div>
 
@@ -56,7 +57,7 @@ export default function LockScreen() {
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           {error && (
-            <div className="bg-rose-50 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400 p-3 rounded-xl text-sm">
+            <div role="alert" className="bg-rose-500/10 text-rose-700 dark:text-rose-400 p-3 rounded-xl text-sm">
               {error}
             </div>
           )}

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus, FileText, Search, MoreHorizontal, FileSignature } from 'lucide-react';
+import { Plus, FileText, Search, Trash2, FileSignature } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDatabaseStore } from '../store/useDatabaseStore';
 import { clickable } from '../lib/a11y';
@@ -20,7 +20,7 @@ export default function Templates() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-semibold tracking-tight">{t('nav.templates')}</h2>
+        <h2 className="text-2xl font-semibold tracking-tight text-primary">{t('nav.templates')}</h2>
         <button 
           onClick={() => navigate('/templates/new')}
           className="flex items-center gap-2 bg-accent-600 hover:bg-accent-700 text-white px-4 py-2 rounded-xl font-medium transition-colors shadow-sm"
@@ -39,30 +39,42 @@ export default function Templates() {
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
               placeholder={t('common.search')}
-              className="w-full pl-9 pr-4 py-2 bg-white dark:bg-slate-950 border border-[var(--border-color)] rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 transition-shadow"
+              aria-label={t('common.search')}
+              className="w-full pl-9 pr-4 py-2 bg-surface border border-[var(--border-color)] rounded-xl text-sm text-primary focus:outline-none focus:ring-2 focus:ring-accent-500 transition-shadow"
             />
           </div>
         </div>
         
         <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredTemplates.map(template => (
-            <div key={template.id} className="border border-[var(--border-color)] rounded-2xl p-5 hover:border-accent-500 transition-colors group bg-white dark:bg-slate-950 flex flex-col cursor-pointer" {...clickable(() => navigate(`/templates/new?id=${template.id}`), template.name)}>
+            <div key={template.id} className="border border-[var(--border-color)] rounded-2xl p-5 hover:border-accent-500 transition-colors group bg-surface flex flex-col cursor-pointer" {...clickable(() => navigate(`/templates/new?id=${template.id}`), template.name)}>
               <div className="flex justify-between items-start mb-4">
-                <div className="w-10 h-10 rounded-xl bg-accent-50 text-accent-600 dark:bg-accent-900/30 dark:text-accent-400 flex items-center justify-center">
+                <div className="w-10 h-10 rounded-xl bg-accent-500/10 text-accent-700 dark:text-accent-300 flex items-center justify-center">
                   <FileText className="w-5 h-5" />
                 </div>
-                <button 
-                  className="p-1 rounded hover:bg-surface-hover dark:hover:bg-slate-800 text-muted opacity-0 group-hover:opacity-100 transition-opacity" 
+                {/* Кнопка удаления видна всегда и подписана: раньше это было
+                    безымянное «⋯», появлявшееся только при наведении. */}
+                <button
+                  type="button"
+                  aria-label={`${t('common.delete')}: ${template.name}`}
+                  title={t('common.delete')}
+                  className="p-1.5 rounded-lg text-muted hover:text-rose-700 dark:hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
                   onClick={async (e) => {
                     e.stopPropagation();
-                    if (await notify.confirm(t('templates.deleteConfirm'), { danger: true })) {
-                      deleteTemplate(template.id);
+                    if (!(await notify.confirm(t('templates.deleteConfirm', { name: template.name }), { danger: true }))) return;
+                    try {
+                      await deleteTemplate(template.id);
+                      notify.success(t('templates.deleted'));
+                    } catch (err) {
+                      notify.error(err instanceof Error ? err.message : String(err));
                     }
-                  }}>
-                  <MoreHorizontal className="w-5 h-5" />
+                  }}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
+                  <Trash2 className="w-4 h-4" />
                 </button>
               </div>
-              <h3 className="font-semibold text-lg group-hover:text-accent-600 dark:group-hover:text-accent-400 transition-colors mb-2">{template.name}</h3>
+              <h3 className="font-semibold text-lg text-primary group-hover:text-accent-700 dark:group-hover:text-accent-300 transition-colors mb-2">{template.name}</h3>
               <p className="text-sm text-muted flex-1">
                 {t('templates.customTemplate', { count: template.blocks.length })}
               </p>

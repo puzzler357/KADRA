@@ -1,13 +1,15 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Users, FileText, Network, BarChart as BarChartIcon, Gift } from 'lucide-react';
+import { Users, FileText, Network, BarChart as BarChartIcon, Gift, Info } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { useDatabaseStore } from '../store/useDatabaseStore';
 import { useMoney } from '../lib/money';
 import { payrollTotal } from '../lib/payroll';
 import { positionStats, staffingSummary } from '../lib/staffing';
-import { auditActionLabel, auditEntityLabel, auditTime } from '../lib/audit';
+import { auditActionLabel, auditEntityLabel } from '../lib/audit';
+import { useDates } from '../lib/dates';
+import { hasDemoRows } from '../data/demo';
 import { CardsSkeleton } from '../components/States';
 import { clickable } from '../lib/a11y';
 
@@ -16,26 +18,38 @@ const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#3b82f6', '#ec4899'];
 export default function Dashboard() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { employees, positions, departments, auditLog, loading } = useDatabaseStore();
-  const templateCount = useDatabaseStore(s => s.templates.length);
+  const { employees, positions, departments, templates, auditLog, loading } = useDatabaseStore();
+  const templateCount = templates.length;
   const money = useMoney();
+  const dates = useDates();
+
+  // В штате — все, кроме уволенных. Уволенный остаётся в картотеке ради
+  // истории, но не входит ни в численность, ни в фонд оплаты труда.
+  const staff = useMemo(() => employees.filter(e => e.status !== 'dismissed'), [employees]);
+  const dismissedCount = employees.length - staff.length;
+
+  // Демо-данные первого запуска: подсказываем убрать их до ввода своих.
+  const demoPresent = useMemo(
+    () => hasDemoRows({ employees, departments, positions, templates }),
+    [employees, departments, positions, templates],
+  );
 
   const birthdaysToday = useMemo(() => {
     const today = new Date();
     const currentMonth = today.getMonth() + 1;
     const currentDay = today.getDate();
     
-    return employees.filter(emp => {
+    return staff.filter(emp => {
       if (!emp.birthDate) return false;
       const [, month, day] = emp.birthDate.split('-');
       return parseInt(month, 10) === currentMonth && parseInt(day, 10) === currentDay;
     });
-  }, [employees]);
+  }, [staff]);
 
   // Расчёт вынесен в src/lib/payroll.ts и покрыт тестами. Заодно убрана
   // подстановка 85 000 каждому сотруднику без оклада: это были выдуманные
   // деньги в отчётной цифре.
-  const totalFOT = useMemo(() => payrollTotal(employees), [employees]);
+  const totalFOT = useMemo(() => payrollTotal(staff), [staff]);
 
   // Вакансии считаются по штатному расписанию — тем же кодом, что и сводка
   // в «Штатном расписании». Раньше здесь стояла формула-заглушка
@@ -54,11 +68,14 @@ export default function Dashboard() {
 
   const departmentData = useMemo(() => {
     const counts: Record<string, number> = {};
-    employees.forEach(emp => {
+    staff.forEach(emp => {
       counts[emp.department] = (counts[emp.department] || 0) + 1;
     });
     return Object.entries(counts).map(([name, value]) => ({ name, value }));
-  }, [employees]);
+  }, [staff]);
+  // Горизонтальные полосы: длинные названия отделов читаются целиком,
+  // а не теряются под осью. Высота растёт с числом отделов.
+  const chartHeight = Math.max(220, departmentData.length * 40 + 40);
 
   // Пока справочники не пришли, показываем скелет: пустые плитки с нулями
   // выглядят как ответ, хотя ответа ещё нет.
@@ -72,6 +89,18 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      {demoPresent && (
+        <div role="note" className="flex flex-wrap items-center gap-3 rounded-2xl border border-accent-500/30 bg-accent-500/10 px-5 py-4">
+          <Info className="w-5 h-5 text-accent-700 dark:text-accent-400 flex-shrink-0" />
+          <p className="text-sm text-primary flex-1 min-w-[16rem]">{t('dashboard.demoHint')}</p>
+          <button
+            onClick={() => navigate('/settings?tab=security')}
+            className="bg-accent-600 hover:bg-accent-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors"
+          >
+            {t('dashboard.demoAction')}
+          </button>
+        </div>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div
           {...clickable(() => navigate('/employees'))}
@@ -81,8 +110,10 @@ export default function Dashboard() {
             <h3 className="text-sm font-medium text-muted">{t('nav.employees')}</h3>
             <Users className="w-5 h-5 text-accent-500" />
           </div>
-          <p className="text-3xl font-semibold tabular-nums text-primary dark:text-primary">{employees.length}</p>
-          <p className="text-sm text-emerald-600 mt-2">{t('dashboard.totalInBase')}</p>
+          <p className="text-3xl font-semibold tabular-nums text-primary dark:text-primary">{staff.length}</p>
+          <p className="text-sm text-emerald-700 dark:text-emerald-400 mt-2">
+            {dismissedCount > 0 ? t('dashboard.inStaffWithDismissed', { count: dismissedCount }) : t('dashboard.inStaff')}
+          </p>
         </div>
         
         <div
@@ -94,7 +125,7 @@ export default function Dashboard() {
             <Network className="w-5 h-5 text-amber-500" />
           </div>
           <p className="text-3xl font-semibold tabular-nums text-primary dark:text-primary">{vacancies}</p>
-          <p className="text-sm text-amber-600 mt-2">{t('dashboard.needsAttention')}</p>
+          <p className="text-sm text-amber-700 dark:text-amber-400 mt-2">{vacancies > 0 ? t('dashboard.needsAttention') : t('dashboard.noVacancies')}</p>
         </div>
         
         <div
@@ -117,7 +148,7 @@ export default function Dashboard() {
             <h3 className="text-sm font-medium text-muted">{t('dashboard.payroll')}</h3>
             <BarChartIcon className="w-5 h-5 text-rose-500" />
           </div>
-          <p className="text-3xl font-semibold tabular-nums text-primary dark:text-primary">{money.format(totalFOT, { compact: true })}</p>
+          <p className="text-3xl font-semibold tabular-nums text-primary dark:text-primary" title={money.format(totalFOT)}>{money.format(totalFOT, { compact: true })}</p>
           <p className="text-sm text-muted mt-2">{t('dashboard.perMonth')}</p>
         </div>
       </div>
@@ -136,7 +167,7 @@ export default function Dashboard() {
                   <p className="text-sm text-muted truncate" title={event.diff || undefined}>
                     {auditEntityLabel(t, event.entity)}{event.diff ? ' · ' + event.diff : ''}
                   </p>
-                  <p className="text-xs text-muted mt-1 tabular-nums">{auditTime(event.ts)}</p>
+                  <p className="text-xs text-muted mt-1 tabular-nums">{dates.dateTime(event.ts)}</p>
                 </div>
               </div>
             ))}
@@ -154,7 +185,7 @@ export default function Dashboard() {
             <div className="space-y-4">
               {birthdaysToday.map(emp => (
                 <div key={emp.id} className="flex items-center gap-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20">
-                  <div className="w-10 h-10 rounded-full bg-rose-500/20 text-rose-500 flex items-center justify-center font-bold text-lg">
+                  <div className="w-10 h-10 rounded-full bg-rose-500/20 text-rose-800 dark:text-rose-300 flex items-center justify-center font-bold text-lg">
                     {emp.fullName.charAt(0)}
                   </div>
                   <div>
@@ -173,23 +204,28 @@ export default function Dashboard() {
         </div>
         <div className="bg-[var(--sidebar-bg)] border border-[var(--border-color)] rounded-2xl p-6 shadow-sm min-h-[300px] flex flex-col">
           <h3 className="text-lg font-semibold mb-4">{t('dashboard.employeesByDept')}</h3>
-          <div className="flex-1 min-h-[250px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={departmentData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-color)" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
-                <Tooltip 
+          <div className="flex-1" style={{ minHeight: chartHeight }}>
+            {departmentData.length === 0 ? (
+              <p className="text-sm text-muted">{t('dashboard.noEmployees')}</p>
+            ) : (
+            <ResponsiveContainer width="100%" height={chartHeight}>
+              <BarChart data={departmentData} layout="vertical" margin={{ top: 0, right: 16, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--border-color)" />
+                <XAxis type="number" allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
+                <YAxis type="category" dataKey="name" width={130} axisLine={false} tickLine={false} tick={{ fontSize: 12 }} interval={0} />
+                <Tooltip
                   cursor={{ fill: 'var(--border-color)', opacity: 0.4 }}
+                  formatter={(value) => [value, t('dashboard.employeesCount')]}
                   contentStyle={{ borderRadius: '12px', border: '1px solid var(--border-color)', backgroundColor: 'var(--sidebar-bg)', color: 'var(--foreground)' }}
                 />
-                <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={22}>
                   {departmentData.map((_entry, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
+            )}
           </div>
         </div>
       </div>

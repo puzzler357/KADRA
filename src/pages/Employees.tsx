@@ -12,15 +12,22 @@ import {
   ColumnFiltersState,
   FilterFn,
 } from '@tanstack/react-table';
-import { ChevronDown, ChevronUp, Upload } from 'lucide-react';
+import { ChevronDown, ChevronUp, Upload, Download } from 'lucide-react';
 import EmployeeForm from '../components/EmployeeForm';
 import EmployeeActions from '../components/EmployeeActions';
-import { exportToExcel, parseExcel } from '../lib/excel';
+import Modal, { secondaryButton } from '../components/Modal';
+import { exportToExcel, saveText } from '../lib/excel';
+import {
+  EXCHANGE_ACCEPT, displayLine, humanRows, prepareRow, readExchangeFile, toCsv, toJson, toXml,
+} from '../lib/employeeExchange';
+import type { ImportRow } from '../lib/employeeExchange';
 import { TableSkeleton } from '../components/States';
 import { useMoney } from '../lib/money';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
 import { useDatabaseStore } from '../store/useDatabaseStore';
 import type { Employee } from '../store/useDatabaseStore';
+import { useAppStore } from '../store/useAppStore';
+import { fileStamp } from '../lib/dates';
 import { useNotify } from '../components/Toasts';
 
 const columnHelper = createColumnHelper<Employee>();
@@ -41,8 +48,11 @@ const rateFilterFn: FilterFn<Employee> = (row, columnId, value) => {
 export default function Employees() {
   const { t } = useTranslation();
   const { employees: data, departments, addEmployee, importEmployees, loading } = useDatabaseStore();
+  const dateFormat = useAppStore((s) => s.dateFormat);
   const money = useMoney();
   const notify = useNotify();
+  const [exportOpen, setExportOpen] = useState(false);
+  const [importResult, setImportResult] = useState<{ imported: number; skipped: ImportRow[] } | null>(null);
 
   const [sorting, setSorting] = useState<SortingState>([]);
   // В поле пишем сразу, а таблицу пересчитываем с задержкой: фильтрация идёт
@@ -81,49 +91,70 @@ export default function Employees() {
   const filtersActive =
     searchInput !== '' || departmentFilter !== 'all' || statusFilter !== 'all' || rateFilter !== 'all';
 
-  const handleAddEmployee = (newEmployee: any) => {
-    addEmployee(newEmployee);
+  // Ошибка сохранения пробрасывается в форму: она покажет её и не закроется.
+  const handleAddEmployee = async (newEmployee: Omit<Employee, 'id'>) => {
+    await addEmployee(newEmployee);
     setIsFormOpen(false);
+    notify.success(t('employees.saved'));
   };
 
-  const handleExport = async () => {
-    await exportToExcel(data, 'Employees');
+  // Выгружается то, что видно: с учётом фильтров и сортировки.
+  const exportRows = () => table.getSortedRowModel().rows.map((row) => row.original);
+
+  const handleExport = async (format: 'xlsx' | 'csv' | 'json' | 'xml') => {
+    setExportOpen(false);
+    const rows = exportRows();
+    if (rows.length === 0) {
+      notify.error(t('employees.exportEmpty'));
+      return;
+    }
+    const base = `${t('employees.fileName')}_${fileStamp()}`;
+    if (format === 'xlsx') {
+      await exportToExcel(humanRows(rows, t, dateFormat), base, {
+        sheetName: t('employees.title'),
+        numberFormats: { [t('exchange.fields.salary')]: '#,##0.00', [t('exchange.fields.rate')]: '0.00' },
+      });
+    } else if (format === 'csv') {
+      await saveText(toCsv(humanRows(rows, t, dateFormat)), `${base}.csv`, 'text/csv');
+    } else if (format === 'json') {
+      await saveText(toJson(rows), `${base}.json`, 'application/json');
+    } else {
+      await saveText(toXml(rows), `${base}.xml`, 'application/xml');
+    }
   };
 
+  // Быстрый импорт: колонки узнаются по заголовкам, строки проверяются теми
+  // же правилами, что и карточка. Пишутся только корректные строки, о
+  // пропущенных — отчёт с номерами строк и причинами.
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    if (fileInputRef.current) fileInputRef.current.value = '';
     if (!file) return;
 
-    let rows: Omit<Employee, 'id'>[];
+    let prepared: ImportRow[];
     try {
-      const parsedData = await parseExcel(file);
-      rows = parsedData.map((row: any) => ({
-        fullName: row['ФИО'] || row['fullName'] || 'Unknown',
-        position: row['Должность'] || row['position'] || 'Unknown',
-        department: row['Подразделение'] || row['department'] || 'Unknown',
-        status: (row['Статус'] || row['status'] || 'active') as Employee['status'],
-        hireDate: row['Дата приема'] || row['hireDate'] || new Date().toISOString().split('T')[0],
-        tabNumber: row['Таб. номер'] || row['tabNumber'] || undefined,
-      }));
+      const raw = await readExchangeFile(file);
+      if (raw.length === 0) {
+        notify.error(t('settings.io.noRows'));
+        return;
+      }
+      prepared = raw.map((row, i) => prepareRow(row, displayLine(file, i), t));
     } catch (err) {
-      console.error('Failed to parse excel:', err);
+      console.error('Failed to read import file:', err);
       notify.error(t('employees.readError'));
-      if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
 
+    const valid = prepared.filter((r) => r.problems.length === 0);
+    const skipped = prepared.filter((r) => r.problems.length > 0);
     try {
       // Пишем в БД, а не только в стор: иначе импортированные строки
       // исчезали при первом же обновлении списка.
-      const created = await importEmployees(rows);
-      notify.success(t('employees.importDone', { n: created }));
+      const created = valid.length > 0 ? await importEmployees(valid.map((r) => r.employee)) : 0;
+      setImportResult({ imported: created, skipped });
     } catch (err) {
       console.error('Failed to import employees:', err);
-      notify.error(t('employees.importFailed'));
-    }
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+      notify.error(err instanceof Error ? err.message : t('employees.importFailed'));
     }
   };
 
@@ -150,7 +181,7 @@ export default function Employees() {
       filterFn: rateFilterFn,
       cell: info => {
         const val = info.getValue() || 1;
-        return <span>{val * 100}%</span>;
+        return <span className="tabular-nums">{Math.round(val * 100)}%</span>;
       },
     }),
     columnHelper.accessor('department', {
@@ -169,6 +200,8 @@ export default function Employees() {
         if (val === 'active') return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400">{t('employees.status.active')}</span>;
         if (val === 'on_leave') return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">{t('employees.status.onLeave')}</span>;
         if (val === 'probation') return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-accent-100 text-accent-800 dark:bg-accent-900/30 dark:text-accent-400">{t('employees.status.probation')}</span>;
+        // Раньше уволенный показывался внутренним кодом «dismissed».
+        if (val === 'dismissed') return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300">{t('employees.status.dismissed')}</span>;
         return val;
       },
     }),
@@ -227,22 +260,48 @@ export default function Employees() {
             type="file"
             ref={fileInputRef}
             onChange={handleImport}
-            accept=".xlsx,.xls"
+            accept={EXCHANGE_ACCEPT}
             className="hidden"
+            data-testid="employees-import-input"
           />
           <button
             onClick={() => fileInputRef.current?.click()}
+            title={t('employees.importHint')}
             className="flex items-center gap-2 bg-surface-3 border border-line hover:bg-surface-hover text-secondary px-4 py-2 rounded-xl font-medium transition-colors shadow-sm text-sm"
           >
             <Upload className="w-4 h-4" />
             {t('common.import')}
           </button>
-          <button
-            onClick={handleExport}
-            className="bg-surface-3 border border-line hover:bg-surface-hover text-secondary px-4 py-2 rounded-xl font-medium transition-colors shadow-sm text-sm"
-          >
-            {t('common.export')}
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => setExportOpen((v) => !v)}
+              aria-haspopup="menu"
+              aria-expanded={exportOpen}
+              className="flex items-center gap-2 bg-surface-3 border border-line hover:bg-surface-hover text-secondary px-4 py-2 rounded-xl font-medium transition-colors shadow-sm text-sm"
+            >
+              <Download className="w-4 h-4" />
+              {t('common.export')}
+              <ChevronDown className="w-4 h-4" />
+            </button>
+            {exportOpen && (
+              <>
+                {/* Щелчок мимо меню закрывает его. */}
+                <div role="presentation" className="fixed inset-0 z-10" onMouseDown={() => setExportOpen(false)} />
+                <div role="menu" className="absolute right-0 mt-2 w-56 bg-[var(--sidebar-bg)] border border-[var(--border-color)] rounded-xl shadow-lg z-20 py-1">
+                  {(['xlsx', 'csv', 'json', 'xml'] as const).map((format) => (
+                    <button
+                      key={format}
+                      role="menuitem"
+                      onClick={() => void handleExport(format)}
+                      className="w-full text-left px-4 py-2 text-sm text-secondary hover:bg-surface-hover"
+                    >
+                      {t(`employees.exportAs.${format}`)}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
           <button
             onClick={() => setIsFormOpen(true)}
             className="bg-accent-500 hover:bg-accent-600 text-white px-4 py-2 rounded-xl font-medium transition-colors shadow-sm text-sm"
@@ -254,17 +313,19 @@ export default function Employees() {
 
       <div className="bg-[var(--sidebar-bg)] border border-[var(--border-color)] rounded-2xl shadow-sm overflow-hidden flex flex-col">
         <div className="p-4 border-b border-[var(--border-color)] flex items-center gap-4 bg-surface-2 dark:bg-slate-900/50">
-          <div className="flex flex-1 items-center gap-3">
+          <div className="flex flex-1 flex-wrap items-center gap-3">
             <div className="relative flex-1 max-w-sm">
               <input
                 type="text"
                 value={searchInput}
                 onChange={e => setSearchInput(e.target.value)}
                 placeholder={t('common.search')}
+                aria-label={t('common.search')}
                 className="w-full px-4 py-2 bg-surface border border-line rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 transition-shadow"
               />
             </div>
             <select
+              aria-label={t('employees.col.department')}
               value={departmentFilter}
               onChange={e => setDepartmentFilter(e.target.value)}
               className="bg-surface border border-line rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 text-secondary w-40"
@@ -275,6 +336,7 @@ export default function Employees() {
               ))}
             </select>
             <select
+              aria-label={t('employees.col.status')}
               value={statusFilter}
               onChange={e => setStatusFilter(e.target.value)}
               className="bg-surface border border-line rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 text-secondary w-40"
@@ -283,8 +345,10 @@ export default function Employees() {
               <option value="active">{t('employees.status.active')}</option>
               <option value="on_leave">{t('employees.status.onLeave')}</option>
               <option value="probation">{t('employees.status.probation')}</option>
+              <option value="dismissed">{t('employees.status.dismissed')}</option>
             </select>
             <select
+              aria-label={t('employees.col.rate')}
               value={rateFilter}
               onChange={e => setRateFilter(e.target.value as RateFilter)}
               className="bg-surface border border-line rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 text-secondary w-40"
@@ -300,14 +364,6 @@ export default function Employees() {
               className="bg-surface-4 hover:bg-surface-hover text-secondary px-4 py-2 rounded-xl text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {t('common.reset')}
-            </button>
-          </div>
-          <div className="flex items-center bg-surface border border-line rounded-xl overflow-hidden flex-shrink-0">
-            <button className="p-2 hover:bg-surface-hover transition-colors bg-surface-3 text-primary">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
-            </button>
-            <button className="p-2 hover:bg-surface-hover transition-colors text-muted">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
             </button>
           </div>
         </div>
@@ -355,7 +411,7 @@ export default function Employees() {
 
           {!loading && tableRows.length === 0 && (
             <div className="p-12 text-center text-muted">
-              {t('employees.empty')}
+              {data.length === 0 ? t('employees.emptyBase') : t('employees.empty')}
             </div>
           )}
         </div>
@@ -366,6 +422,47 @@ export default function Employees() {
           onClose={() => setIsFormOpen(false)}
           onSubmit={handleAddEmployee}
         />
+      )}
+
+      {importResult && (
+        <Modal
+          title={t('employees.importResultTitle')}
+          onClose={() => setImportResult(null)}
+          size="lg"
+          footer={<button onClick={() => setImportResult(null)} className={secondaryButton}>{t('common.close')}</button>}
+        >
+          <div className="space-y-4 text-sm">
+            <p className="text-emerald-700 dark:text-emerald-400 font-medium" data-testid="import-imported">
+              {t('employees.importDone', { n: importResult.imported })}
+            </p>
+            {importResult.skipped.length > 0 && (
+              <>
+                <p className="text-rose-700 dark:text-rose-400 font-medium" data-testid="import-skipped">
+                  {t('employees.importSkipped', { n: importResult.skipped.length })}
+                </p>
+                <table className="w-full text-left">
+                  <thead className="text-muted border-b border-[var(--border-color)]">
+                    <tr>
+                      <th className="py-2 pr-3 font-medium">{t('settings.io.rowNo')}</th>
+                      <th className="py-2 pr-3 font-medium">{t('employees.col.fullName')}</th>
+                      <th className="py-2 font-medium">{t('settings.io.problems')}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--border-color)]">
+                    {importResult.skipped.slice(0, 50).map((row) => (
+                      <tr key={row.line}>
+                        <td className="py-2 pr-3 tabular-nums text-muted">{row.line}</td>
+                        <td className="py-2 pr-3">{row.employee.fullName || '—'}</td>
+                        <td className="py-2 text-rose-700 dark:text-rose-400">{row.problems.join('; ')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="text-xs text-muted">{t('employees.importSkippedHint')}</p>
+              </>
+            )}
+          </div>
+        </Modal>
       )}
     </div>
   );

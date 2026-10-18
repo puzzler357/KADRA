@@ -28,6 +28,12 @@ export interface Employee {
   paymentType?: 'salary' | 'hourly' | 'piecework';
   salary?: number;
   rate?: number;
+  /**
+   * Дата увольнения. Ставится кадровой операцией «Увольнение» и снимается
+   * повторным приёмом. Нужна табелю и отчётам: после этой даты человек не
+   * работает, и дни ему не засчитываются.
+   */
+  dismissalDate?: string | null;
 }
 
 export interface TimesheetRecord {
@@ -142,6 +148,8 @@ export interface Movement {
   toSalary: number;
   orderNo?: string;
   reason?: string;
+  /** ФИО на момент операции — остаётся в журнале и после удаления карточки. */
+  employeeName?: string;
 }
 
 /** Запись журнала аудита. Пишется слоем данных, а не экранами. */
@@ -199,4 +207,40 @@ export interface AuthUser {
 export interface LoginResult {
   user: AuthUser;
   token: string;
+}
+
+/** Состояние учётной записи владельца. */
+export interface AuthStatus {
+  hasOwner: boolean;
+  hasPassword: boolean;
+  /** Запрашивать пароль при входе. Хранится в базе, а не в браузере. */
+  requirePassword: boolean;
+  /** Имя владельца — экран входа здоровается по имени. */
+  ownerName: string | null;
+}
+
+/**
+ * Утверждённая редакция штатного расписания: снимок подразделений и
+ * должностей на дату вступления в силу.
+ */
+export interface StaffingRevision {
+  id: string;
+  title: string;
+  /** Дата вступления в силу, ГГГГ-ММ-ДД. */
+  effectiveDate: string;
+  createdAt: string;
+  note?: string;
+  /** JSON StaffingSnapshot. */
+  snapshot: string;
+}
+
+/** Цикл оценки 360°: период и круг участников. */
+export interface ReviewCycle {
+  id: string;
+  period: string;
+  /** JSON-массив идентификаторов подразделений; пустой массив — вся организация. */
+  scope: string;
+  startedAt: string;
+  /** active | closed */
+  status: string;
 }

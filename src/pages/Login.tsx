@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../store/useAppStore';
 import * as api from '../data';
 import PasswordInput from '../components/PasswordInput';
-import { Monitor, Moon, Sun, Lock, Mail } from 'lucide-react';
+import { Monitor, Moon, Sun, Lock } from 'lucide-react';
 
 const fieldClass = 'block w-full pl-10 pr-3 py-2 border border-[var(--border-color)] rounded-xl bg-[var(--background)] focus:outline-none focus:ring-2 focus:ring-accent-500 sm:text-sm';
 
@@ -11,57 +11,54 @@ const fieldClass = 'block w-full pl-10 pr-3 py-2 border border-[var(--border-col
  * Экран входа.
  *
  * Показывается только тогда, когда владелец сам включил запрос пароля при
- * входе. По умолчанию приложение открывается сразу и этот экран не
- * встречается ни разу: учётной записи может не быть вовсе, а заводят её в
- * профиле и только если она зачем-то понадобилась.
+ * входе. Учётная запись в приложении одна, поэтому спрашивается только
+ * пароль: раньше форма требовала ещё и email, и учётная запись, заведённая
+ * с одним именем, запиралась насовсем.
  */
-export default function Login() {
+export default function Login({ ownerName }: { ownerName?: string | null }) {
   const { t } = useTranslation();
   const { theme, setTheme, login } = useAppStore();
 
-  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  // Фокус в поле пароля при открытии экрана: вводить больше нечего.
+  const passwordRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { passwordRef.current?.focus(); }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
     try {
-      const data = await api.login(email, password);
+      const data = await api.login(password);
       login(data.user, data.token);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('login.failed'));
+      setPassword('');
     } finally {
       setLoading(false);
     }
   };
 
+  const themeButton = (value: 'light' | 'system' | 'dark', title: string, Icon: typeof Sun) => (
+    <button
+      type="button"
+      onClick={() => setTheme(value)}
+      aria-label={title}
+      title={title}
+      className={`p-1.5 rounded-lg transition-colors ${theme === value ? 'bg-surface shadow-sm text-accent-600 dark:text-accent-400' : 'text-muted hover:text-primary'}`}
+    >
+      <Icon className="w-4 h-4" />
+    </button>
+  );
+
   return (
     <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)] flex flex-col justify-center py-12 sm:px-6 lg:px-8">
-      <div className="absolute top-4 right-4 flex items-center p-1 bg-surface-3 dark:bg-slate-800 rounded-xl border border-[var(--border-color)]">
-        <button
-          onClick={() => setTheme('light')}
-          className={`p-1.5 rounded-lg transition-colors ${theme === 'light' ? 'bg-white dark:bg-slate-700 shadow-sm text-accent-600 dark:text-accent-400' : 'text-muted hover:text-primary dark:hover:text-slate-300'}`}
-          title={t('settings.light')}
-        >
-          <Sun className="w-4 h-4" />
-        </button>
-        <button
-          onClick={() => setTheme('system')}
-          className={`p-1.5 rounded-lg transition-colors ${theme === 'system' ? 'bg-white dark:bg-slate-700 shadow-sm text-accent-600 dark:text-accent-400' : 'text-muted hover:text-primary dark:hover:text-slate-300'}`}
-          title={t('settings.system')}
-        >
-          <Monitor className="w-4 h-4" />
-        </button>
-        <button
-          onClick={() => setTheme('dark')}
-          className={`p-1.5 rounded-lg transition-colors ${theme === 'dark' ? 'bg-white dark:bg-slate-700 shadow-sm text-accent-600 dark:text-accent-400' : 'text-muted hover:text-primary dark:hover:text-slate-300'}`}
-          title={t('settings.dark')}
-        >
-          <Moon className="w-4 h-4" />
-        </button>
+      <div className="absolute top-4 right-4 flex items-center p-1 bg-surface-3 rounded-xl border border-[var(--border-color)]">
+        {themeButton('light', t('settings.light'), Sun)}
+        {themeButton('system', t('settings.system'), Monitor)}
+        {themeButton('dark', t('settings.dark'), Moon)}
       </div>
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
@@ -75,35 +72,18 @@ export default function Login() {
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-[var(--sidebar-bg)] py-8 px-4 shadow-sm border border-[var(--border-color)] sm:rounded-2xl sm:px-10">
           <form className="space-y-6" onSubmit={handleLogin}>
+            {ownerName && (
+              <p className="text-center text-primary font-medium" data-testid="login-owner">{ownerName}</p>
+            )}
+
             {error && (
-              <div className="bg-rose-50 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400 p-3 rounded-xl text-sm text-center">
+              <div role="alert" className="bg-rose-500/10 text-rose-700 dark:text-rose-400 p-3 rounded-xl text-sm text-center">
                 {error}
               </div>
             )}
 
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-secondary dark:text-slate-300">
-                Email
-              </label>
-              <div className="mt-1 relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Mail className="h-5 w-5 text-muted" />
-                </div>
-                <input
-                  id="email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className={fieldClass}
-                />
-              </div>
-            </div>
-
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-secondary dark:text-slate-300">
+              <label htmlFor="password" className="block text-sm font-medium text-secondary">
                 {t('login.password')}
               </label>
               <div className="mt-1 relative">
@@ -114,6 +94,7 @@ export default function Login() {
                   id="password"
                   name="password"
                   autoComplete="current-password"
+                  ref={passwordRef}
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -132,11 +113,7 @@ export default function Login() {
               </button>
             </div>
 
-            {/* Подсказка с учётными данными раньше висела на боевом экране входа.
-                Теперь её нет вовсе: подставлять нечего, пароль задаёт владелец. */}
-            {import.meta.env.DEV && (
-              <p className="text-center text-xs text-muted mt-4">{t('login.devHint')}</p>
-            )}
+            <p className="text-center text-xs text-muted">{t('login.forgotHint')}</p>
           </form>
         </div>
       </div>

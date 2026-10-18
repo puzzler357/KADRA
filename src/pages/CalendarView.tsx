@@ -36,9 +36,9 @@ const KIND_ICON: Record<EventKind, typeof Cake> = {
 };
 
 const KIND_COLOR: Record<EventKind, string> = {
-  birthday: 'text-rose-400 bg-rose-500/10',
-  anniversary: 'text-amber-400 bg-amber-500/10',
-  timeOff: 'text-accent-400 bg-accent-500/10',
+  birthday: 'text-rose-800 dark:text-rose-300 bg-rose-500/10',
+  anniversary: 'text-amber-800 dark:text-amber-300 bg-amber-500/10',
+  timeOff: 'text-accent-700 dark:text-accent-300 bg-accent-500/10',
 };
 
 export default function CalendarView() {
@@ -132,13 +132,15 @@ export default function CalendarView() {
         <div className="flex items-center bg-[var(--sidebar-bg)] border border-[var(--border-color)] rounded-xl overflow-hidden">
           <button
             onClick={() => setCursor(addMonths(cursor, -1))}
+            aria-label={t('timesheet.prevMonth')}
             className="p-2 hover:bg-surface-hover dark:hover:bg-slate-800 transition-colors"
           >
             <ChevronLeft className="w-5 h-5 text-muted" />
           </button>
-          <span className="px-6 font-medium text-sm">{months[cursor.getMonth()]} {cursor.getFullYear()}</span>
+          <span className="px-6 font-medium text-sm" data-testid="calendar-month">{months[cursor.getMonth()]} {cursor.getFullYear()}</span>
           <button
             onClick={() => setCursor(addMonths(cursor, 1))}
+            aria-label={t('timesheet.nextMonth')}
             className="p-2 hover:bg-surface-hover dark:hover:bg-slate-800 transition-colors"
           >
             <ChevronRight className="w-5 h-5 text-muted" />
@@ -166,7 +168,7 @@ export default function CalendarView() {
                   key={day.toISOString()}
                   className={`bg-[var(--sidebar-bg)] p-2 min-h-[100px] transition-colors hover:bg-surface-hover dark:hover:bg-slate-900/50 ${isToday(day) ? 'ring-1 ring-inset ring-accent-500' : ''}`}
                 >
-                  <span className={`text-sm font-medium ${outside ? 'text-faint' : isToday(day) ? 'text-accent-400' : 'text-secondary'}`}>
+                  <span className={`text-sm font-medium ${outside ? 'text-faint' : isToday(day) ? 'text-accent-700 dark:text-accent-300' : 'text-secondary'}`}>
                     {day.getDate()}
                   </span>
 

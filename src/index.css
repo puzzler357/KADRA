@@ -133,8 +133,9 @@
     /* Текст */
     --text-primary: var(--color-slate-900);
     --text-secondary: var(--color-slate-700);
-    --text-muted: var(--color-slate-500);
-    --text-faint: var(--color-slate-400);
+    /* slate-600/500: вспомогательный текст читается на всех фонах (≥ 4,5 : 1) */
+    --text-muted: var(--color-slate-600);
+    --text-faint: var(--color-slate-500);
 
     /* Обратная совместимость со старыми переменными */
     --background: var(--surface-app);
@@ -165,7 +166,8 @@
     --text-primary: var(--color-slate-100);
     --text-secondary: var(--color-slate-300);
     --text-muted: var(--color-slate-400);
-    --text-faint: var(--color-slate-500);
+    /* slate-400: вспомогательный текст на тёмных фонах — не ниже 4,5 : 1 */
+    --text-faint: var(--color-slate-400);
 
     --background: var(--surface-app);
     --foreground: var(--text-primary);
@@ -239,9 +241,47 @@
     border-radius: 0.75rem;
   }
 
+  /* Текст статей базы знаний. Плагина typography в проекте нет, а preflight
+     Tailwind обнуляет заголовки и списки, поэтому кнопки «Заголовок» и
+     «Список» раньше ничего видимого не делали. */
+  .kb-content > * + * { margin-top: 0.75em; }
+  .kb-content h1 { font-size: 1.6em; font-weight: 700; line-height: 1.25; }
+  .kb-content h2 { font-size: 1.3em; font-weight: 600; line-height: 1.3; }
+  .kb-content ul { list-style: disc; padding-left: 1.5em; }
+  .kb-content ol { list-style: decimal; padding-left: 1.5em; }
+  .kb-content li > p { margin: 0; }
+  .kb-content strong { font-weight: 700; }
+  .kb-content a { color: var(--accent-700); text-decoration: underline; }
+  .dark .kb-content a { color: var(--accent-300); }
+  .kb-content blockquote { border-left: 3px solid var(--border-strong); padding-left: 1em; color: var(--text-secondary); }
+  /* Подсказка в пустом редакторе (расширение Placeholder) */
+  .kb-content p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    color: var(--text-faint);
+    pointer-events: none;
+  }
+
+  /* Область печати документа (PrintPortal): на экране не видна. */
+  .print-portal {
+    display: none;
+  }
+
   @media print {
     .no-print {
       display: none !important;
+    }
+    body.has-print-portal > *:not(.print-portal) {
+      display: none !important;
+    }
+    body.has-print-portal > .print-portal {
+      display: block !important;
+    }
+    /* Поля листа не закрашиваются фоном тёмной темы, даже если в диалоге
+       печати включена «Печать фона». */
+    html, body {
+      background: white !important;
     }
     body, .print-container {
       background-color: white !important;

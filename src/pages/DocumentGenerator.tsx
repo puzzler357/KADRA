@@ -1,117 +1,58 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useDatabaseStore } from '../store/useDatabaseStore';
-import { useMoney } from '../lib/money';
-import { canonicalName, renderTemplate } from '../lib/templateVars';
-import type { TemplateValues } from '../lib/templateVars';
 import { FileText, Download, Printer } from 'lucide-react';
-import { generateDocx } from '../lib/docx';
+import { useDatabaseStore } from '../store/useDatabaseStore';
 import { useAppStore } from '../store/useAppStore';
+import { generateDocx } from '../lib/docx';
+import { localDateISO, useDates } from '../lib/dates';
+import { documentParagraphs, safeFileName, templateVariables } from '../lib/templateBlocks';
 import { useNotify } from '../components/Toasts';
+import { PrintPortal, TemplateDocument, useTemplateValues } from '../components/TemplateDocument';
 
 export default function DocumentGenerator() {
   const { t } = useTranslation();
   const { templates, employees } = useDatabaseStore();
-  const money = useMoney();
   const docxTemplatePath = useAppStore((s) => s.docxTemplatePath);
-  const orgName = useAppStore((s) => s.orgName);
+  const dates = useDates();
   const notify = useNotify();
   const [selectedTemplate, setSelectedTemplate] = useState('');
   const [selectedEmployee, setSelectedEmployee] = useState('');
   const [variables, setVariables] = useState<Record<string, string>>({});
 
-  const template = templates.find(t => t.id === selectedTemplate);
+  const template = templates.find(item => item.id === selectedTemplate);
   const employee = employees.find(e => e.id === selectedEmployee);
+  const { values, auto } = useTemplateValues(employee, variables);
+  const sortedEmployees = useMemo(
+    () => employees.slice().sort((a, b) => a.fullName.localeCompare(b.fullName, 'ru')),
+    [employees],
+  );
 
-  const handlePrint = () => {
-    window.print();
-  };
-
-  /**
-   * Значения переменных: введённое вручную важнее карточки сотрудника —
-   * человек правит поле именно тогда, когда карточка его не устраивает.
-   */
-  const templateValues = useMemo((): TemplateValues => {
-    const fromEmployee: TemplateValues = employee ? {
-      fullName: employee.fullName,
-      position: employee.position,
-      department: employee.department,
-      salary: money.format(employee.salary ?? 0),
-      hireDate: employee.hireDate,
-    } : {};
-
-    const manual: TemplateValues = {};
-    for (const [name, value] of Object.entries(variables)) {
-      if (value !== '') manual[canonicalName(name)] = value;
-    }
-
-    return { ...fromEmployee, orgName, ...manual };
-  }, [employee, variables, money, orgName]);
-
-  // Текст документа без разметки — то же, что видно в предпросмотре.
-  const plainParagraphs = (): { text: string }[] => {
-    if (!template) return [];
-    return template.blocks
-      .filter(block => block.type !== 'signature' && block.type !== 'table')
-      .map(block => ({ text: renderTemplate(block.content || '', templateValues) }))
-      .filter(p => p.text.trim() !== '');
-  };
+  // Переменные шаблона — из текста и из ячеек таблиц, в каноническом виде:
+  // {{ФИО}} и {{fullName}} — одно поле.
+  const templateVars = template ? templateVariables(template, t) : [];
+  const fileName = template
+    ? `${safeFileName(employee ? `${template.name} — ${employee.fullName}` : template.name)}.docx`
+    : '';
 
   const handleDownloadDocx = async () => {
     if (!template) return;
     try {
       await generateDocx(docxTemplatePath, {
-        orgName,
+        orgName: values.orgName ?? '',
         title: template.name,
-        date: new Date().toLocaleDateString(),
-        paragraphs: plainParagraphs(),
-      }, `${template.name}.docx`);
+        date: dates.date(localDateISO()),
+        paragraphs: documentParagraphs(template, values, t),
+      }, fileName);
+      notify.success(t('docgen.docxSaved', { file: fileName }));
     } catch {
       // generateDocx уже пишет причину в консоль; пользователю нужен факт.
-      notify.error(t('docgen.docxHint'));
+      notify.error(t('docgen.docxFailed'));
     }
-  };
-
-  const renderContent = () => {
-    if (!template) return null;
-    let contentHtml = '';
-    template.blocks.forEach(block => {
-      if (block.type === 'signature') {
-        contentHtml += `<div style="display: flex; justify-content: space-between; margin-top: 4rem; margin-bottom: 2rem;">
-          <div style="width: 30%; border-top: 1px solid black; padding-top: 0.5rem; text-align: center; font-size: 0.875rem;">${t('builder.employeeSignature')}</div>
-          <div style="width: 30%; border-top: 1px solid black; padding-top: 0.5rem; text-align: center; font-size: 0.875rem;">${t('builder.headSignature')}</div>
-        </div>`;
-        return;
-      }
-      
-      if (block.type === 'table') {
-        contentHtml += `<table style="width: 100%; border-collapse: collapse; margin-bottom: 1.5rem;">
-          <thead>
-            <tr>
-              <th style="border: 1px solid #e2e8f0; padding: 0.75rem; text-align: left; background-color: #f8fafc;">${t('docgen.tableIndicator')}</th>
-              <th style="border: 1px solid #e2e8f0; padding: 0.75rem; text-align: left; background-color: #f8fafc;">${t('docgen.tableValue')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td style="border: 1px solid #e2e8f0; padding: 0.75rem;">${t('docgen.baseSalary')}</td>
-              <td style="border: 1px solid #e2e8f0; padding: 0.75rem;">${variables['salary'] || (employee?.salary != null ? money.format(employee.salary) : '...')}</td>
-            </tr>
-          </tbody>
-        </table>`;
-        return;
-      }
-
-      const text = renderTemplate(block.content || '', templateValues);
-      contentHtml += `<p style="margin-bottom: 1rem; text-align: left">${text}</p>`;
-    });
-
-    return <div dangerouslySetInnerHTML={{ __html: contentHtml }} />;
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center no-print">
+      <div className="flex flex-wrap justify-between items-center gap-3 no-print">
         <div>
           <h2 className="text-2xl font-bold tracking-tight text-primary">{t('docgen.title')}</h2>
           <p className="text-muted mt-1">{t('docgen.subtitle')}</p>
@@ -126,9 +67,9 @@ export default function DocumentGenerator() {
             {t('docgen.downloadDocx')}
           </button>
           <button
-            onClick={handlePrint}
+            onClick={() => window.print()}
             disabled={!template}
-            className="bg-accent-500 hover:bg-accent-600 disabled:opacity-50 text-white px-4 py-2 rounded-xl flex items-center gap-2 text-sm font-medium transition-colors"
+            className="bg-accent-600 hover:bg-accent-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl flex items-center gap-2 text-sm font-medium transition-colors"
           >
             <Printer className="w-4 h-4" />
             {t('docgen.printPdf')}
@@ -143,29 +84,33 @@ export default function DocumentGenerator() {
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-muted mb-1">{t('docgen.template')}</label>
+                <label htmlFor="docgen-template" className="block text-sm font-medium text-muted mb-1">{t('docgen.template')}</label>
                 <select
-                  className="w-full bg-app border border-line rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-accent-500"
+                  id="docgen-template"
+                  className="w-full bg-app border border-line rounded-xl px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent-500"
                   value={selectedTemplate}
                   onChange={e => setSelectedTemplate(e.target.value)}
                 >
                   <option value="">{t('docgen.chooseTemplate')}</option>
-                  {templates.map(t => (
-                    <option key={t.id} value={t.id}>{t.name}</option>
+                  {templates.map(item => (
+                    <option key={item.id} value={item.id}>{item.name}</option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-muted mb-1">{t('docgen.employeeOptional')}</label>
+                <label htmlFor="docgen-employee" className="block text-sm font-medium text-muted mb-1">{t('docgen.employeeOptional')}</label>
                 <select
-                  className="w-full bg-app border border-line rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-accent-500"
+                  id="docgen-employee"
+                  className="w-full bg-app border border-line rounded-xl px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent-500"
                   value={selectedEmployee}
                   onChange={e => setSelectedEmployee(e.target.value)}
                 >
                   <option value="">{t('docgen.noEmployee')}</option>
-                  {employees.map(e => (
-                    <option key={e.id} value={e.id}>{e.fullName} - {e.position}</option>
+                  {sortedEmployees.map(e => (
+                    <option key={e.id} value={e.id}>
+                      {e.fullName} — {e.position}{e.status === 'dismissed' ? ` (${t('employees.status.dismissed')})` : ''}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -174,28 +119,28 @@ export default function DocumentGenerator() {
 
           {template && (
             <div className="bg-surface border border-line rounded-2xl p-6">
-              <h3 className="font-medium text-primary mb-4">{t('templates.variables')}</h3>
+              <h3 className="font-medium text-primary mb-1">{t('templates.variables')}</h3>
               <p className="text-xs text-muted mb-4">{t('docgen.fillFields')}</p>
-              
+
               <div className="space-y-3">
-                {/* Dynamically extract variables from blocks: {{VarName}} */}
-                {Array.from(new Set(
-                  template.blocks.flatMap(b => {
-                    const matches = b.content?.match(/\{\{(.*?)\}\}/g);
-                    return matches ? matches.map(m => m.replace(/\{\{|\}\}/g, '')) : [];
-                  })
-                )).filter(v => !['ФИО', 'Должность', 'Отдел', 'fullName', 'position', 'department'].includes(v)).map(v => (
-                  <div key={v}>
-                    <label className="block text-xs font-medium text-muted mb-1">{v}</label>
-                    <input 
+                {templateVars.map((name, index) => (
+                  <div key={name}>
+                    <label htmlFor={`docgen-var-${index}`} className="block text-xs font-medium text-muted mb-1">
+                      {t(`docgen.vars.${name}`, { defaultValue: name })}
+                    </label>
+                    <input
+                      id={`docgen-var-${index}`}
                       type="text"
-                      className="w-full bg-app border border-line rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-accent-500"
-                      value={variables[v] || ''}
-                      onChange={e => setVariables({...variables, [v]: e.target.value})}
-                      placeholder={t('docgen.enterVar', { v: v.toLowerCase() })}
+                      className="w-full bg-app border border-line rounded-xl px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent-500"
+                      value={variables[name] ?? ''}
+                      onChange={e => setVariables({ ...variables, [name]: e.target.value })}
+                      // Подсказка — значение, которое подставится само; если
+                      // его нет — просьба ввести.
+                      placeholder={auto[name] || t('docgen.enterValue')}
                     />
                   </div>
                 ))}
+                {templateVars.length === 0 && <p className="text-sm text-muted">{t('docgen.noVariables')}</p>}
               </div>
             </div>
           )}
@@ -203,12 +148,12 @@ export default function DocumentGenerator() {
 
         <div className="lg:col-span-2">
           {template ? (
-            <div id="document-content" className="bg-white text-black p-12 min-h-[842px] shadow-lg rounded-sm print-container print-only">
-              <h1 className="text-2xl font-bold mb-8 text-center">{template.name}</h1>
-              <div className="text-sm leading-relaxed whitespace-pre-wrap">
-                {renderContent()}
-              </div>
-            </div>
+            <>
+              <TemplateDocument template={template} values={values} className="p-12 min-h-[842px] shadow-lg rounded-sm no-print" />
+              <PrintPortal>
+                <TemplateDocument template={template} values={values} className="p-0" />
+              </PrintPortal>
+            </>
           ) : (
             <div className="bg-surface-2 border-2 border-dashed border-line rounded-2xl p-12 flex flex-col items-center justify-center text-center h-[500px] no-print">
               <div className="w-16 h-16 bg-surface-3 rounded-2xl flex items-center justify-center mb-4 text-muted">

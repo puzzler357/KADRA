@@ -43,8 +43,9 @@ const NotifyContext = createContext<NotifyApi | null>(null);
 export const notifyOutsideReact: { current: NotifyApi | null } = { current: null };
 
 const KIND_STYLE: Record<ToastKind, { icon: typeof Info; className: string }> = {
-  success: { icon: CheckCircle2, className: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' },
-  error: { icon: AlertTriangle, className: 'border-rose-500/30 bg-rose-500/10 text-rose-400' },
+  // Подложка непрозрачная: полупрозрачный тост над светлой страницей читался плохо.
+  success: { icon: CheckCircle2, className: 'border-emerald-500/40 bg-surface text-emerald-700 dark:text-emerald-400' },
+  error: { icon: AlertTriangle, className: 'border-rose-500/40 bg-surface text-rose-700 dark:text-rose-400' },
   info: { icon: Info, className: 'border-line bg-surface-3 text-secondary' },
 };
 
@@ -132,13 +133,13 @@ export function NotifyProvider({ children }: { children: ReactNode }) {
         </div>
       )}
 
-      <div className="fixed bottom-6 right-6 z-[210] flex flex-col gap-3 w-80 max-w-[calc(100vw-3rem)]">
+      <div className="no-print fixed bottom-6 right-6 z-[210] flex flex-col gap-3 w-80 max-w-[calc(100vw-3rem)]">
         {toasts.map(toast => {
           const { icon: Icon, className } = KIND_STYLE[toast.kind];
           return (
             <div
               key={toast.id}
-              role="status"
+              role={toast.kind === 'error' ? 'alert' : 'status'}
               className={`flex items-start gap-3 border rounded-xl px-4 py-3 shadow-lg backdrop-blur-sm ${className}`}
             >
               <Icon className="w-5 h-5 flex-shrink-0 mt-0.5" />
