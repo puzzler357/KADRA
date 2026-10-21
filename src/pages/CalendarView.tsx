@@ -57,32 +57,49 @@ export default function CalendarView() {
     end: endOfWeek(endOfMonth(cursor), { weekStartsOn: 1 }),
   }), [cursor]);
 
+  // Ежегодные события (дни рождения, годовщины) строятся на все годы, которые
+  // видны: в сетке (декабрь показывает первые дни января и наоборот) и в
+  // «Предстоящих» на 60 дней вперёд. Раньше брался только год открытого
+  // месяца, и в декабре январские события не показывались нигде.
+  const years = useMemo(() => {
+    const today = new Date();
+    const horizon = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 60);
+    const set = new Set<number>([
+      gridDays[0].getFullYear(),
+      gridDays[gridDays.length - 1].getFullYear(),
+      today.getFullYear(),
+      horizon.getFullYear(),
+    ]);
+    return Array.from(set).sort((a, b) => a - b);
+  }, [gridDays]);
+
   const events = useMemo(() => {
     const result: CalendarEvent[] = [];
-    const year = cursor.getFullYear();
 
     for (const emp of employees) {
       const birth = toDate(emp.birthDate);
-      if (birth) {
-        result.push({
-          id: `b-${emp.id}`,
-          date: inYear(birth, year),
-          kind: 'birthday',
-          title: emp.fullName,
-          subtitle: t('calendar.birthday'),
-        });
-      }
-
       const hired = toDate(emp.hireDate);
-      // Сам день приёма годовщиной не считается — она начинается через год.
-      if (hired && hired.getFullYear() < year) {
-        result.push({
-          id: `a-${emp.id}`,
-          date: inYear(hired, year),
-          kind: 'anniversary',
-          title: emp.fullName,
-          subtitle: `${t('calendar.anniversary')} · ${year - hired.getFullYear()}`,
-        });
+      for (const year of years) {
+        if (birth) {
+          result.push({
+            id: `b-${emp.id}-${year}`,
+            date: inYear(birth, year),
+            kind: 'birthday',
+            title: emp.fullName,
+            subtitle: t('calendar.birthday'),
+          });
+        }
+
+        // Сам день приёма годовщиной не считается — она начинается через год.
+        if (hired && hired.getFullYear() < year) {
+          result.push({
+            id: `a-${emp.id}-${year}`,
+            date: inYear(hired, year),
+            kind: 'anniversary',
+            title: emp.fullName,
+            subtitle: `${t('calendar.anniversary')} · ${year - hired.getFullYear()}`,
+          });
+        }
       }
     }
 
@@ -105,7 +122,7 @@ export default function CalendarView() {
     }
 
     return result;
-  }, [employees, timeOffRequests, cursor, t]);
+  }, [employees, timeOffRequests, years, t]);
 
   const eventsOn = (day: Date) => events.filter(e => isSameDay(e.date, day));
 

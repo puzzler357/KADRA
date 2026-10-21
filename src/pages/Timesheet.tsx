@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback } fr
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { exportToExcel } from '../lib/excel';
 import { ATTENDANCE_CODES, codeForDay, employedInMonth, isWeekend, nextCode, timesheetTotals } from '../lib/timesheet';
-import { archiveRecordsForMonth, employmentOf } from '../lib/archiveMonth';
+import { archiveRecordsForMonth, employmentOf, monthNotEnded } from '../lib/archiveMonth';
 import { useTranslation } from 'react-i18next';
 import { Clock, Calendar as CalendarIcon, Save, ChevronLeft, ChevronRight, Download, Archive as ArchiveIcon, AlertTriangle } from 'lucide-react';
 import { useDatabaseStore } from '../store/useDatabaseStore';
@@ -190,6 +190,8 @@ export default function Timesheet() {
       notify.error(t('timesheet.archiveEmpty'));
       return;
     }
+    // Незаконченный месяц ушёл бы в архив с явками за будущие дни.
+    if (monthNotEnded(year, month) && !(await notify.confirm(t('timesheet.archiveNotEnded', { month: monthLabel }), { danger: true }))) return;
     try {
       const existing = (await api.listArchives({ year })).filter(r => r.month === month + 1);
       const question = existing.length > 0

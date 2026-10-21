@@ -5,16 +5,9 @@ import { useAppStore } from '../store/useAppStore';
 import { useDatabaseStore, TABLES } from '../store/useDatabaseStore';
 import type { TimeOffRequest } from '../store/useDatabaseStore';
 import { localDateISO, useDates } from '../lib/dates';
+import { daysBetween, vacationBalance, vacationExcess, yearsOf } from '../lib/vacation';
 import { useNotify } from '../components/Toasts';
 import Modal, { Field, inputClass, primaryButton, secondaryButton } from '../components/Modal';
-
-/** Календарных дней в интервале, включая обе границы. */
-function daysBetween(from: string, to: string): number {
-  const start = new Date(from);
-  const end = new Date(to);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return 0;
-  return Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
-}
 
 /** Пересекаются ли два интервала дат (ГГГГ-ММ-ДД), включая границы. */
 const overlaps = (a: { dateFrom: string; dateTo: string }, b: { dateFrom: string; dateTo: string }) =>
@@ -46,17 +39,12 @@ export default function TimeOff() {
     : timeOffRequests
   ).slice().sort((a, b) => b.dateFrom.localeCompare(a.dateFrom));
 
-  // Остаток отпуска считается по каждому сотруднику: норма из «Настроек»
-  // минус согласованные дни отпуска в этом году. Раньше плитка вычитала
-  // из одной нормы отпуска всех сотрудников сразу и уходила в ноль.
+  // Остаток отпуска считается по каждому сотруднику и по каждому году:
+  // норма из «Настроек» минус согласованные дни, приходящиеся на этот год.
+  // Отпуск через Новый год делится между годами (src/lib/vacation.ts).
   const currentYear = new Date().getFullYear();
-  const balanceOf = (employeeId: string) => {
-    const mine = timeOffRequests.filter(r => r.employeeId === employeeId && r.type === 'vacation'
-      && r.dateFrom.startsWith(String(currentYear)));
-    const used = mine.filter(r => r.status === 'approved').reduce((sum, r) => sum + r.days, 0);
-    const pending = mine.filter(r => r.status === 'pending').reduce((sum, r) => sum + r.days, 0);
-    return { used, pending, left: annualVacationDays - used };
-  };
+  const balanceOf = (employeeId: string, year = currentYear) =>
+    vacationBalance(timeOffRequests, employeeId, year, annualVacationDays);
 
   const [balanceEmployeeId, setBalanceEmployeeId] = useState<string>(() => ownEmployeeId ?? '');
   const balanceTarget = balanceEmployeeId || ownEmployeeId || staff[0]?.id || '';
@@ -70,8 +58,12 @@ export default function TimeOff() {
   const [formError, setFormError] = useState('');
 
   const requestedDays = daysBetween(newRequest.dateFrom, newRequest.dateTo);
-  const requestBalance = newRequest.employeeId ? balanceOf(newRequest.employeeId) : null;
-  const overLimit = newRequest.type === 'vacation' && requestBalance !== null && requestedDays > requestBalance.left;
+  // Новая заявка сверяется с остатком тех лет, на которые она приходится,
+  // а не текущего: в декабре заявка на январь — это отпуск следующего года.
+  const requestYears = newRequest.employeeId && requestedDays > 0 ? yearsOf(newRequest) : [];
+  const requestExcess = newRequest.type === 'vacation' && newRequest.employeeId && requestedDays > 0
+    ? vacationExcess(timeOffRequests, newRequest, annualVacationDays)
+    : [];
   const conflict = newRequest.employeeId
     ? timeOffRequests.find(r => r.employeeId === newRequest.employeeId && r.status !== 'rejected' && overlaps(r, newRequest))
     : undefined;
@@ -107,8 +99,9 @@ export default function TimeOff() {
   const handleAction = async (req: TimeOffRequest, status: string) => {
     // Согласование отпуска сверх остатка — осознанное решение, спрашиваем.
     if (status === 'approved' && req.type === 'vacation') {
-      const left = balanceOf(req.employeeId).left;
-      if (req.days > left && !(await notify.confirm(t('timeoff.approveOverLimit', { name: employeeName(req.employeeId), days: req.days, left })))) return;
+      for (const excess of vacationExcess(timeOffRequests, req, annualVacationDays, req)) {
+        if (!(await notify.confirm(t('timeoff.approveOverLimit', { name: employeeName(req.employeeId), ...excess })))) return;
+      }
     }
     await updateIn(TABLES.timeOff, req.id, { status });
   };
@@ -166,11 +159,13 @@ export default function TimeOff() {
             </div>
             <p className="text-sm text-secondary">
               {t('timeoff.daysCount')}: <span className="text-primary font-medium" data-testid="timeoff-days">{requestedDays}</span>
-              {newRequest.type === 'vacation' && requestBalance && (
-                <> · {t('timeoff.leftAfter', { left: requestBalance.left })}</>
-              )}
+              {newRequest.type === 'vacation' && requestYears.map(year => (
+                <React.Fragment key={year}> · {t('timeoff.leftAfter', { year, left: balanceOf(newRequest.employeeId, year).left })}</React.Fragment>
+              ))}
             </p>
-            {overLimit && <p className="text-sm text-amber-700 dark:text-amber-400">{t('timeoff.overLimit', { left: requestBalance!.left })}</p>}
+            {requestExcess.map(excess => (
+              <p key={excess.year} className="text-sm text-amber-700 dark:text-amber-400">{t('timeoff.overLimit', { year: excess.year, left: excess.left })}</p>
+            ))}
             {conflict && !formError && (
               <p className="text-sm text-amber-700 dark:text-amber-400">
                 {t('timeoff.overlap', { from: dates.date(conflict.dateFrom), to: dates.date(conflict.dateTo) })}
@@ -283,7 +278,7 @@ export default function TimeOff() {
                   <td className="p-table text-table text-secondary text-right tabular-nums">{req.days}</td>
                   {activeTab === 'team' && (
                     <td className="p-table text-table text-secondary text-right tabular-nums">
-                      {req.type === 'vacation' ? balanceOf(req.employeeId).left : '—'}
+                      {req.type === 'vacation' ? balanceOf(req.employeeId, Number(req.dateFrom.slice(0, 4))).left : '—'}
                     </td>
                   )}
                   <td className="p-table text-table">

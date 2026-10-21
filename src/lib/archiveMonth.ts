@@ -41,3 +41,27 @@ export function archiveRecordsForMonth(
     })
     .sort((a, b) => a.employeeName.localeCompare(b.employeeName, 'ru'));
 }
+
+const pad = (n: number) => String(n).padStart(2, '0');
+
+/**
+ * Прошлый месяц — то, что обычно закрывают. Месяц табеля 0–11. В январе это
+ * декабрь прошлого года: раньше год оставался текущим, и 10 января кнопка
+ * предлагала закрыть декабрь, который ещё не наступил.
+ */
+export function previousMonth(now: Date = new Date()): { year: number; month: number } {
+  const date = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  return { year: date.getFullYear(), month: date.getMonth() };
+}
+
+/**
+ * Остались ли в месяце дни после сегодняшнего (по местному времени). Такие
+ * дни попали бы в архив явками по графику — закрывать такой месяц можно,
+ * но только осознанно.
+ */
+export function monthNotEnded(year: number, month: number, now: Date = new Date()): boolean {
+  const last = new Date(year, month + 1, 0);
+  const lastIso = `${last.getFullYear()}-${pad(last.getMonth() + 1)}-${pad(last.getDate())}`;
+  const todayIso = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  return lastIso > todayIso;
+}

@@ -6,7 +6,7 @@ import { useMoney } from '../lib/money';
 import { Download, Printer, FileText, Plus } from 'lucide-react';
 import { exportSheet } from '../lib/excel';
 import { exportTablePdf } from '../lib/pdfTable';
-import { archiveRecordsForMonth } from '../lib/archiveMonth';
+import { archiveRecordsForMonth, monthNotEnded, previousMonth } from '../lib/archiveMonth';
 import { fileStamp, useDates } from '../lib/dates';
 import { useNotify } from '../components/Toasts';
 import Modal, { Field, inputClass, primaryButton, secondaryButton } from '../components/Modal';
@@ -152,6 +152,8 @@ export default function Archive() {
         return;
       }
       const label = `${monthNames[month]} ${year}`;
+      // Незаконченный месяц ушёл бы в архив с явками за будущие дни.
+      if (monthNotEnded(year, month) && !(await notify.confirm(t('timesheet.archiveNotEnded', { month: label }), { danger: true }))) return;
       const existing = (await api.listArchives({ year })).filter(r => r.month === month + 1);
       const question = existing.length > 0
         ? t('timesheet.archiveReplace', { month: label, count: existing.length })
@@ -179,7 +181,7 @@ export default function Archive() {
         </div>
         <div className="flex flex-wrap items-center gap-3 no-print">
           <button
-            onClick={() => setCloseDialog({ year: now.getFullYear(), month: now.getMonth() === 0 ? 11 : now.getMonth() - 1 })}
+            onClick={() => setCloseDialog(previousMonth())}
             className="flex items-center gap-2 px-4 py-2 bg-surface-3 text-primary rounded-lg hover:bg-surface-hover transition-colors"
           >
             <Plus className="w-4 h-4" />

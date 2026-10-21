@@ -4,7 +4,7 @@ import { Users, TrendingDown, ClipboardList, BarChart as BarChartIcon, Download,
 import { exportToExcel, saveText } from '../lib/excel';
 import { exportTablePdf } from '../lib/pdfTable';
 import { useMoney } from '../lib/money';
-import { useDates, fileStamp } from '../lib/dates';
+import { useDates, fileStamp, localDateISO } from '../lib/dates';
 import { positionStats } from '../lib/staffing';
 import { ABSENCE_CODES, timesheetTotals } from '../lib/timesheet';
 import { employmentOf } from '../lib/archiveMonth';
@@ -298,7 +298,7 @@ export default function Reports() {
     if (!reportTable) return;
     const title = reports.find(r => r.id === selectedReport)?.title ?? 'Report';
     const periodText = selectedReport === 3 ? `${monthNames[period.month]} ${period.year}`
-      : selectedReport === 2 || selectedReport === 4 ? String(period.year) : dates.date(new Date().toISOString().slice(0, 10));
+      : selectedReport === 2 || selectedReport === 4 ? String(period.year) : dates.date(localDateISO());
     try {
       await exportTablePdf({
         title,
